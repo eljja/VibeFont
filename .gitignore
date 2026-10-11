@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments & Virtual Envs
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# PyTorch checkpoints & Datasets
+checkpoints/
+models/weights/
+data/raw/
+data/processed/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+
+# Node / Web Frontend
+node_modules/
+.next/
+dist-web/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs & Wandb
+logs/
+wandb/
