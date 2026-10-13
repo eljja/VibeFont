@@ -1,159 +1,117 @@
-# VibeFont: 차세대 동적 필기체 합성 시스템 마스터 개발 계획서
+# VibeFont: 동적 필기체 합성 시스템 마스터 개발 계획서
 
-**Version:** 1.0.0  
-**Target Architecture:** Autoregressive Stroke LMM (No Diffusion) + Procedural Physical Ink Shader  
-**Repository:** [https://github.com/eljja/VibeFont](https://github.com/eljja/VibeFont)  
-**Primary Reviewer:** Claude Opus (Architecture & Mathematics Verification)  
+**Version:** 1.1.0 (Opus 리뷰 반영 — [OPUS_REVIEW_v1.md](reviews/OPUS_REVIEW_v1.md))  
+**Architecture:** Autoregressive Stroke Model (No Diffusion) + Procedural Physical Ink Shader  
+**Repository:** https://github.com/eljja/VibeFont
 
----
-
-## 1. 프로젝트 비전 및 핵심 패러다임
-
-기존 디지털 필기체 폰트의 근본적인 한계:
-1. **정적 글리프(Static Glyphs):** 동일한 글자는 문맥과 상관없이 항상 100% 동일한 형태로 출력됨.
-2. **단절된 연결(Broken Ligatures):** 앞 글자의 꼬리(Exit stroke)와 뒷 글자의 머리(Entry stroke)가 물리적으로 이어지지 않음.
-3. **물리적 질감 부재:** 펜촉의 필압, 속도에 따른 잉크 뭉침(Pooling), 종이 번짐(Bleeding) 등의 아날로그 감성이 없음.
-
-**VibeFont의 해결책:**
-텍스트를 픽셀 이미지가 아닌 **'연속적 펜 궤적(Continuous Pen Trajectory)'**으로 모델링하고, 질감은 **'물리 셰이더(Procedural Shader)'**로 분리 렌더링하는 2단계 하이브리드 파이프라인.
-
-```
-[User Text + Style Prompt/Image]
-               │
-               ▼
-   ┌────────────────────────────────────────┐
-   │         LMM Trajectory Generator       │
-   │  (Track A: 50M~300M / Track B: 0.5~1.5B)│
-   └────────────────────────────────────────┘
-               │ Stroke Coordinates: (x, y, p, state)
-               ▼
-   ┌────────────────────────────────────────┐
-   │    Procedural Physics Ink Shader       │
-   │  (WebGL / WebGPU / Canvas2D Engine)    │
-   └────────────────────────────────────────┘
-               │
-               ▼
-[최종 출력: 벡터(SVG) 또는 초고해상도 잉크 렌더링]
-```
+> [!NOTE]
+> **v1.0 → v1.1 주요 변경:** IAM-OnDB 통계 정정 · 필압을 선택 채널로 변경 · `END_OF_CHAR` → CTC 강제 정렬 기반 `ADVANCE` · 1포인트=1포지션 분해 헤드 · 오차 피드백 양자화 · 시간 기준 리샘플링 · 모델 규모 하향(A: 5~25M, B 디코더: 50~300M) · 평가 체계 신설 · 폰트 스켈레톤화를 한글 자모 수집 방식으로 대체 · Phase 0 추가
 
 ---
 
-## 2. Track A: 스트로크 궤적 기반 경량 LMM (50M ~ 300M)
+## 1. 비전
 
-### 2.1. 목적 및 요구사항
-* **목표:** 텍스트와 텍스트 스타일 임베딩(Style ID/Vibe Vector)을 입력받아 실시간으로 사람이 쓴 것 같은 필기 궤적을 자기회귀(Autoregressive) 방식으로 생성.
-* **타겟 환경:** 스마트폰 온디바이스, 웹 브라우저(WebGPU / ONNX Runtime Web)에서 60fps 이상 실시간 스트로크 드로잉.
-* **파라미터 규모:** 80M ~ 200M (Sweet Spot: ~120M).
+기존 필기체 폰트의 한계(정적 글리프, 단절된 연결, 물리 질감 부재)를 해결하기 위해, 텍스트를 **연속적인 펜 궤적**으로 생성하고 질감은 **절차적 셰이더**로 따로 렌더링한다.
 
-### 2.2. 데이터 표현 및 토크나이징 설계 (Tokenization)
-연속적인 펜 움직임을 트랜스포머가 처리할 수 있도록 이산 토큰화(Discretization)합니다.
+```
+[텍스트 + 스타일(ID 또는 참조 이미지)]
+        │
+        ▼
+ Stroke Generator (Track A: 5~25M / Track B: 인코더 + 50~300M 디코더)
+        │  출력: (Δx, Δy, Δt, pen_state, [pressure])
+        ▼
+ Procedural Ink Shader (WebGL2 → WebGPU)
+        │  v, a, 곡률, 유사 필압은 렌더러에서 유도
+        ▼
+ SVG / 고해상도 래스터
+```
 
-* **스트로크 시퀀스 단위 정의:**
-  $$T_i = (\Delta x_i, \Delta y_i, p_i, s_i)$$
-  * $\Delta x_i, \Delta y_i$: 이전 좌표 대비 상대 변위 (8-bit or 10-bit Quantization, -512 ~ +512 bin).
-  * $p_i$: 필압 (Pressure, 0~255).
-  * $s_i$: 펜 상태 (State: `PEN_DOWN`, `PEN_UP`, `END_OF_CHAR`, `END_OF_TEXT`).
-* **대안 아키텍처 검토 (Bézier Segment Tokenization):**
-  * 조밀한 점 시퀀스 대신 **3차 베지어 곡선(Cubic Bézier) 제어점 ($P_0, P_1, P_2, P_3$)** 단위로 토큰화하여 시퀀스 길이를 1/5로 압축하는 방안.
-
-### 2.3. 모델 아키텍처
-* **Text Encoder (Prefix):**
-  * 6-Layer Small Transformer (Hidden Dim: 384, Char/Byte 단위 BPE).
-  * 텍스트 철자를 1:1 보존하기 위해 서브워드가 아닌 문자(Character) 단위 인코딩 필수.
-* **Trajectory Decoder:**
-  * 12-Layer Decoder-only Transformer (Hidden Dim: 512, Heads: 8, Intermediate Dim: 2048, ~120M params).
-  * **Attention 구조:**
-    * Causal Self-Attention (Trajectory History 반영).
-    * Cross-Attention with Localized Monotonic Window: 글씨는 왼쪽에서 오른쪽으로 순차적으로 쓰여지므로, 텍스트 인코더와의 정렬이 역전되지 않도록 모노토닉(단조) 어텐션 유도 또는 윈도우 마스크 적용.
-* **Output Heads:**
-  * Quantized Coordinate Classification Head (Cross-Entropy Loss) 또는
-  * GMM/MDN Head (Mixture Density Network Head for continuous coordinate regression).
-  * *권장:* 안정적인 학습과 모드 붕괴 방지를 위해 이산 분류(Cross-Entropy) 헤드 우선 검증.
-
-### 2.4. 데이터셋 구축 파이프라인
-1. **기존 온라인 필기 데이터셋:**
-   * **IAM-OnDB (IAM On-Line Handwriting Database):** 영문 필기 궤적 표준 (86,272개 텍스트 라인).
-   * **AI Hub 한글 필기체 궤적 데이터:** 한글 초성/중성/종성 궤적 데이터.
-2. **오프라인 폰트 역벡터화 (Font Skeletonization Synthesis):**
-   * 기존 필기체 폰트의 TTF/OTF 외곽선에서 중심선(Medial Axis / Voronoi Skeleton)을 추출하고, 휴리스틱 오더링(TSP/위상 정렬) 알고리즘을 거쳐 대규모 합성 온라인 궤적 데이터 자동 생성 (수백만 단어 규모 증강).
+**차별점 (선행연구 대비):** Graves 2013 / calligrapher.ai(Track A 원형), SDT CVPR 2023(Track B 원형)이 이미 존재한다. VibeFont의 차별점은 **① 한글 지원, ② 물리 잉크 셰이더, ③ 실시간 웹/온디바이스, ④ 가독성-다양성 제어 UX**에 있다.
 
 ---
 
-## 3. Track B: 스타일 비전 인코더 결합형 LMM (0.5B ~ 1.5B)
+## 2. 데이터
 
-### 3.1. 목적 및 요구사항
-* **목표:** 사용자가 업로드한 손글씨 사진 1장(Few-shot / In-Context Visual Reference)을 입력받아, 그 사람 고유의 자간, 기울기, 필압 분포, 합자(연결) 습관을 그대로 모사하여 지정된 텍스트를 작성.
-* **타겟 환경:** 클라우드 GPU API 서버 (A10G, T4, L4 등 경량 GPU에서 단일 배치 추론 가능).
-* **파라미터 규모:** 0.8B ~ 1.3B.
+| 소스 | 내용 | 비고 |
+|---|---|---|
+| **IAM-OnDB** | 영문 온라인 필기, 작성자 221명, 텍스트 라인 약 13,049개, 단어 인스턴스 86,272개 | x, y, t만 있고 **필압 없음**. 글자 단위 분할 라벨 없음. 라이선스 확인 필요 |
+| **자체 수집 웹앱** | Pointer Events API로 x, y, t, pressure, tilt 기록 | 한글 위치별 자모 + 조합 틀 우선 수집. 필압/기울기 실측 확보 |
+| 한글 공개 온라인 데이터 | — | **존재 여부 검증 필요** (AI Hub는 주로 오프라인 이미지) |
+| ~~폰트 스켈레톤화~~ | — | **제외**: 정적 글리프 편향, 동역학 정보 없음. 필요할 경우 보조 사전학습에만 사용 |
 
-### 3.2. 모델 아키텍처 설계
-```
-[Reference Handwriting Image]          [Target Text: "VibeFont Engine"]
-            │                                         │
-            ▼                                         ▼
-   ┌─────────────────┐                       ┌─────────────────┐
-   │  Vision Encoder │                       │   Text Encoder  │
-   │ (SigLIP / DINO) │                       │  (Transformer)  │
-   └─────────────────┘                       └─────────────────┘
-            │                                         │
-            ▼ (Perceiver / MLP Resampler)              │
-    [Style Tokens: S_1...S_k]                         │
-            └────────────────────┬────────────────────┘
-                                 │
-                                 ▼
-                    ┌───────────────────────────┐
-                    │ Trajectory Decoder (0.8B) │
-                    │   (Track A Scaled Up)     │
-                    └───────────────────────────┘
-                                 │
-                                 ▼
-                     [Predicted Stroke Stream]
-```
-
-* **Visual Style Encoder:**
-  * **후보 A:** `DINOv2-small/base` (저수준 기하학, 획의 질감, 선 굵기 등 자기지도 시각 특징 추출에 가장 우수).
-  * **후보 B:** `SigLIP-So400M` (텍스트-이미지 정렬이 우수하나 고주파 선 기하학 특징에서는 DINO 대비 검토 필요).
-  * **Style Resampler:** ViT의 패치 임베딩을 고정된 $K=32$개 또는 $64$개의 **Style Tokens**로 압축하는 Perceiver Resampler 레이어.
-* **Trajectory Decoder Backbone:**
-  * 24-Layer Transformer (~800M params, Hidden Dim: 1024, Heads: 16).
-  * Prefix에 Style Token들을 위치시키고, Text에 Cross-Attention을 걸며 Stroke를 자기회귀 생성.
-
-### 3.3. 학습 전략 (3단계 커리큘럼)
-1. **Stage 1: Trajectory Backbone 사전학습**
-   * Track A에서 검증된 텍스트-궤적 생성 모델을 대규모 합성 궤적 데이터셋으로 사전학습.
-2. **Stage 2: 스타일 대조 학습 (Style Contrastive Pretraining)**
-   * 동일 작성자의 다른 문장 궤적 / 다른 작성자의 동일 문장 궤적을 이용하여 스타일 인코더가 내용(Text Content)과 무관하게 필체(Style Invariant)만을 추출하도록 대조 손실(InfoNCE) 학습.
-3. **Stage 3: End-to-End Few-shot 파인튜닝**
-   * (손글씨 이미지 패치, 텍스트) $\to$ (정답 궤적 토큰) 형태로 전과정 파인튜닝.
-   * 이미지 증강: 조명 변화, 종이 구김, 렌즈 왜곡, 크롭 노이즈 적용.
+### 전처리
+1. **시간 기준 균등 리샘플링**(60~100Hz). 호 길이 기준 리샘플링은 속도 정보를 지우므로 금지.
+2. 기준선(baseline) 기울기 보정은 선택 사항. 스타일 정보이므로 기본값은 **보존**.
+3. 높이 정규화(x-height 기준).
+4. 유사 필압: $\tilde p=\sigma(a-b\,v)$ (실측이 없을 때).
 
 ---
 
-## 4. 공통 코어: 물리 잉크 렌더러 (Procedural Ink Shader)
+## 3. 토크나이저
 
-AI가 출력한 궤적에 '진짜 만년필/볼펜'의 감성을 불어넣는 렌더링 엔진입니다.
-
-```
-AI 출력: (x, y, p, t)
-   ↓
-물리 연산: 속도 v = Δd / Δt, 가속도 a, 압력 p
-   ↓
-기하 메쉬(Mesh) 생성: 펜촉 형태(Nib Shape & Angle)에 따른 버텍스 확장
-   ↓
-프래그먼트 셰이더(Fragment Shader):
-   - 만년필: v가 낮으면 Pooling(잉크 뭉침), 외곽선 Feathering(종이 스며듬), 농담(Shading)
-   - 볼펜: 선 양끝의 릿지(Ridge), 중앙의 미세 스킵(Skip), 잉크 찌꺼기(Goop)
-```
-
-* **장점:** 렌더링에 AI 연산이 들지 않으므로, 생성 즉시 4K/벡터 해상도로 초당 60프레임 무지연 렌더링 보장.
+- **1 포인트 = 1 시퀀스 포지션.** 입력 = $E_{\Delta x}+E_{\Delta y}+E_{\Delta t}+E_{s}$ (+ $E_p$).
+- **비균등 bin**: 축별 128~256개, μ-law 또는 분위수 기반.
+- **오차 피드백 양자화**: $\hat{\mathbf{x}}_i=\hat{\mathbf{x}}_{i-1}+Q(\mathbf{x}_i-\hat{\mathbf{x}}_{i-1})$ → 누적 drift 제거.
+- **pen_state**: `DOWN`, `UP`, `EOS`. 글자 진행은 별도 `ADVANCE` 플래그(§4)로 처리.
+- 베지어 토크나이징은 **보류** (고주파 떨림 손실). 시퀀스 길이가 병목이 될 때 재검토.
+- **완료 기준:** 왕복(encode→decode) 복원 오차 평균 < 0.5px (x-height 100px 기준).
 
 ---
 
-## 5. 단계별 마일스톤 및 로드맵
+## 4. Track A — 경량 스트로크 모델 (5~25M)
 
-| 단계 | 기간 | 주요 마일스톤 (Track A & B 연계) | 산출물 |
-| :---: | :---: | :--- | :--- |
-| **Phase 1** | 1~3주차 | **수학적 모델 검증 & 토크나이저 구축**<br>• IAM-OnDB 기반 전처리 및 토크나이저 구현<br>• 베지어 곡선 vs 포인트 양자화 비교 실험<br>• 웹 캔버스 베이직 셰이더 프로토타입 | Stroke Tokenizer, Web Shader v0.1 |
-| **Phase 2** | 4~7주차 | **Track A (경량 LMM) 학습 및 온디바이스 포팅**<br>• 100M 트랜스포머 아키텍처 학습<br>• Temperature 노이즈 기반 인스턴스별 변형 검증<br>• ONNX/WebGPU 변환 및 웹 데모 구현 | VibeFont-Nano (100M), WebGPU Demo |
-| **Phase 3** | 8~12주차 | **Track B (스타일 비전 결합) 개발**<br>• DINOv2 기반 Style Resampler 설계<br>• 멀티모달 Few-shot 데이터 파이프라인 가동<br>• 0.8B 모델 학습 및 스타일 모사율 평가 | VibeFont-Vision (0.8B), Style Cloner API |
-| **Phase 4** | 13~15주차 | **통합 및 상용화 파이프라인 완성**<br>• 셰이더 고급화 (만년필 번짐, 수채화, 볼펜 완성도)<br>• 시스템 폰트(OpenType-SVG) 내보내기 익스포터 개발 | VibeFont Suite v1.0 |
+- **텍스트 인코더:** 문자 단위, 4층, d=256.
+- **디코더:** 6~8층 decoder-only, d=256~384.
+- **정렬 (최우선 권장):** 온라인 HTR(CTC)로 강제 정렬 → 각 포인트에 현재 글자 인덱스 부여 → 디코더에 *현재 + 다음 글자 임베딩*을 하드 조건부로 입력, `ADVANCE` 확률 예측.
+  - 기준선: Graves식 단조 가우시안 윈도우.
+- **출력 헤드 (자기회귀 분해):** $P(s)\,P(\Delta x\mid s)\,P(\Delta y\mid s,\Delta x)\,P(\Delta t\mid\cdot)$.
+- **스타일:** writer 임베딩(학습 시 작성자 ID) → 추론 시 고정. 샘플링 노이즈 = 같은 작성자 안에서의 변동.
+- **제어:** temperature + sampling bias ("정갈함 ↔ 자유로움" 슬라이더).
+- **기준선:** 소형 LSTM+MDN(Graves 재현), 같은 평가 지표로 비교.
+- **배포:** ONNX → onnxruntime-web(WebGPU), KV 캐시.
+
+## 5. Track B — 참조 이미지 기반 스타일 모사
+
+- **스타일 인코더 후보 (writer 검색 정확도로 결정):**
+  1. writer-ID 대조 학습(InfoNCE)으로 처음부터 학습한 소형 CNN/ViT
+  2. DINOv2-small 파인튜닝
+  - SigLIP/CLIP은 비권장 (의미 정렬이 기하학적 특징을 지움).
+- **Resampler:** Perceiver, K=32 스타일 토큰. 내용 누출 방지를 위해 단어 단위 크롭/패치 셔플 증강.
+- **디코더:** Track A 구조를 50~300M까지 확장(스케일링 실험으로 결정).
+- **학습 쌍:** IAM-OnDB 궤적을 **VibeFont 셰이더 + 종이 텍스처 + 사진 열화**로 렌더링해서 (이미지, 궤적) 쌍을 만들고, 실제 사진으로 소량 파인튜닝.
+- **기준선:** SDT (Dai et al., CVPR 2023).
+
+---
+
+## 6. 잉크 셰이더
+
+- **입력:** (x, y, t, state, [p]) → 렌더러가 v, a, 곡률, 유사 필압을 계산.
+- **사용자 파라미터:** 펜 종류, 펜촉 폭 W, 펜촉 각도 $\theta_{nib}$, 잉크/종이 프리셋.
+- **넓은 펜촉:** $w=W|\sin(\theta_{stroke}-\theta_{nib})|+w_{min}$
+- **만년필:** 침착량 $\propto 1/v$ (고임), 종이 섬유 노이즈 기반 비등방 블러(번짐).
+- **볼펜:** 밀도 $\propto f(p)\,g(v)$ + 호 길이 방향 1D 노이즈(스킵) + 획 시작점 뭉침.
+- **구현:** 리본 메쉬(정점 속성) → 프래그먼트 셰이더 → 종이 합성 패스. WebGL2 우선.
+
+---
+
+## 7. 평가
+
+| 지표 | 방법 |
+|---|---|
+| 가독성 | 생성 결과의 HTR CER/WER |
+| 스타일 충실도 (B) | writer 분류 정확도, 스타일 임베딩 유사도 |
+| 인스턴스 다양성 | 같은 입력 N회 생성 간 DTW 거리 분포 |
+| 자연스러움 | 궤적 특징 FID 유사 지표 + 블라인드 테스트 |
+| 성능 | WebGPU 포인트/초 |
+
+---
+
+## 8. 로드맵
+
+| Phase | 내용 | 완료 기준 |
+|---|---|---|
+| **0. 데이터 감사** (1주) | IAM-OnDB 확보·통계, 한글 온라인 데이터 조사, 라이선스 | `docs/DATA_CARD.md` |
+| **1. 기반** (2~3주) | 전처리, 토크나이저, 온라인 HTR + 강제 정렬, 수집 웹앱, WebGL2 셰이더 v0 | 왕복 오차 < 0.5px, HTR CER 측정 가능 |
+| **2. Track A** (3~4주) | MDN 기준선, 이산 트랜스포머 5M/25M, 평가 체계, 웹 데모 | 생성 CER ≤ 실제 데이터 +5%p, 다양성 > 0 |
+| **3. Track B** (4~5주) | 렌더링 쌍 생성, 인코더 비교, SDT 기준선 | writer 검색 Top-5, CER 유지 |
+| **4. 한글/제품화** | 자모 데이터, 셰이더 고도화, 내보내기 | — |
