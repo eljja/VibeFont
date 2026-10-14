@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>VibeFont Ink Collector (손글씨 수집기)</title>
+  <style>
+    :root {
+      --bg: #f8f9fa;
+      --card: #ffffff;
+      --primary: #4361ee;
+      --text: #212529;
+      --border: #dee2e6;
+      --rule: #e9ecef;
+      --baseline: #dc3545;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-touch-callout: none; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+    }
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .header-left {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    h1 { font-size: 1.1rem; font-weight: 700; color: var(--primary); }
+    .badge { font-size: 0.75rem; background: #eef2ff; color: var(--primary); padding: 3px 8px; border-radius: 999px; }
+    .controls { display: flex; gap: 8px; align-items: center; }
+    button {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    button:hover { background: #f1f3f5; border-color: #ced4da; }
+    button.primary { background: var(--primary); color: white; border-color: var(--primary); }
+    button.primary:hover { background: #3a56d4; }
+    .prompt-bar {
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .target-text {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: #111827;
+      letter-spacing: 0.05em;
+    }
+    .stats {
+      font-size: 0.8rem;
+      color: #6c757d;
+      display: flex;
+      gap: 12px;
+    }
+    .canvas-container {
+      flex: 1;
+      position: relative;
+      background: #faf8f5;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+    .footer {
+      background: var(--card);
+      border-top: 1px solid var(--border);
+      padding: 8px 16px;
+      font-size: 0.75rem;
+      color: #868e96;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <h1>VibeFont Collector</h1>
+      <span class="badge">Pointer Events (Pressure &amp; Tilt)</span>
+    </div>
+    <div class="controls">
+      <input type="text" id="writerInput" placeholder="작성자 ID (예: user01)" style="padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem;">
+      <button id="btnPrev">◀ 이전</button>
+      <button id="btnNext" class="primary">다음 ▶</button>
+      <button id="btnUndo">⤺ 되돌리기</button>
+      <button id="btnClear">지우기</button>
+      <button id="btnExport" class="primary">📥 JSON 내보내기</button>
+    </div>
+  </header>
+
+  <div class="prompt-bar">
+    <div>
+      <span style="font-size: 0.75rem; color: #868e96; text-transform: uppercase;">제시어:</span>
+      <div id="targetText" class="target-text">가나다라마바사 아자차카타파하</div>
+    </div>
+    <div class="stats">
+      <span>진행: <b id="statProgress">1 / 50</b></span>
+      <span>획수: <b id="statStrokes">0</b></span>
+      <span>포인트: <b id="statPoints">0</b></span>
+    </div>
+  </div>
+
+  <div class="canvas-container" id="canvasContainer">
+    <canvas id="paintCanvas"></canvas>
+  </div>
+
+  <div class="footer">
+    <span>💡 스타일러스 펜(Apple Pencil, S-Pen 등)의 필압이 자동 감지됩니다. 빨간 점선(기준선)에 맞춰 글씨를 써주세요.</span>
+    <span id="pressureIndicator">필압: --</span>
+  </div>
+
+  <script>
+    // Standard prompt set: Hangul syllables, pangrams, english
+    const PROMPTS = [
+      "가나다라마바사 아자차카타파하",
+      "동해 물과 백두산이 마르고 닳도록",
+      "하느님이 보우하사 우리나라 만세",
+      "무궁화 삼천리 화려 강산",
+      "대한 사람 대한으로 길이 보전하세",
+      "키스의 고유조건은 입술끼리 만나야 하고 특별한 기술은 필요치 않다",
+      "다람쥐 헌 쳇바퀴에 타고파",
+      "내가 그린 기린 그림은 잘 그린 기린 그림이고",
+      "봄바람 휘날리며 흩날리는 벚꽃 잎이",
+      "오늘도 행복하고 즐거운 하루 되세요",
+      "The quick brown fox jumps over the lazy dog",
+      "Pack my box with five dozen liquor jugs",
+      "How vexingly quick daft zebras jump",
+      "1234567890 !@#$%^&*()",
+      "생각하는 갈대, 인간은 자연 가운데 가장 연약한 하나의 갈대에 불과하다",
+      "바람이 분다, 살아야겠다",
+      "별을 노래하는 마음으로 모든 죽어가는 것을 사랑해야지",
+      "그리고 나한테 주어진 길을 걸어가야겠다",
+      "오늘 밤에도 별이 바람에 스치운다"
+    ];
+
+    let currentPromptIdx = 0;
+    let strokes = []; // Array of { points: [ {x, y, t, p} ] }
+    let collectedData = []; // Completed items
+
+    const canvas = document.getElementById("paintCanvas");
+    const ctx = canvas.getContext("2d");
+    const container = document.getElementById("canvasContainer");
+    const targetTextEl = document.getElementById("targetText");
+    const statProgress = document.getElementById("statProgress");
+    const statStrokes = document.getElementById("statStrokes");
+    const statPoints = document.getElementById("statPoints");
+    const pressureInd = document.getElementById("pressureIndicator");
+    const writerInput = document.getElementById("writerInput");
+
+    function resize() {
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+      redraw();
+    }
+    window.addEventListener("resize", resize);
+
+    function updatePromptUI() {
+      targetTextEl.textContent = PROMPTS[currentPromptIdx];
+      statProgress.textContent = `${currentPromptIdx + 1} / ${PROMPTS.length}`;
+      statStrokes.textContent = strokes.length;
+      let totalPts = strokes.reduce((acc, s) => acc + s.points.length, 0);
+      statPoints.textContent = totalPts;
+    }
+
+    function drawGuidelines() {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      const midY = h * 0.55; // Baseline
+      const topY = midY - 60; // Ascender / x-height
+
+      ctx.save();
+      // Corpus line (x-height)
+      ctx.beginPath();
+      ctx.strokeStyle = "#e9ecef";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(30, topY);
+      ctx.lineTo(w - 30, topY);
+      ctx.stroke();
+
+      // Baseline
+      ctx.beginPath();
+      ctx.strokeStyle = "#ff8787";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.moveTo(30, midY);
+      ctx.lineTo(w - 30, midY);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function redraw() {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+      drawGuidelines();
+
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      for (const stroke of strokes) {
+        const pts = stroke.points;
+        if (pts.length < 2) {
+          if (pts.length === 1) {
+            ctx.fillStyle = "#1e293b";
+            ctx.beginPath();
+            ctx.arc(pts[0].x, pts[0].y, (pts[0].p || 0.5) * 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          continue;
+        }
+
+        for (let i = 1; i < pts.length; i++) {
+          const p0 = pts[i - 1];
+          const p1 = pts[i];
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y);
+          ctx.lineTo(p1.x, p1.y);
+          const p = (p0.p + p1.p) * 0.5;
+          ctx.lineWidth = Math.max(1.0, p * 4.5);
+          ctx.strokeStyle = `rgba(30, 41, 59, ${0.4 + 0.6 * p})`;
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Pointer events
+    let isDrawing = false;
+    let currentStroke = null;
+
+    canvas.addEventListener("pointerdown", (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      isDrawing = true;
+      const rect = canvas.getBoundingClientRect();
+      const p = e.pressure > 0 ? e.pressure : 0.5;
+      const pt = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+        t: e.timeStamp / 1000.0,
+        p: p
+      };
+      currentStroke = { points: [pt] };
+      strokes.push(currentStroke);
+      redraw();
+      pressureInd.textContent = `필압: ${p.toFixed(2)}`;
+    });
+
+    canvas.addEventListener("pointermove", (e) => {
+      if (!isDrawing || !currentStroke) return;
+      const rect = canvas.getBoundingClientRect();
+      const p = e.pressure > 0 ? e.pressure : 0.5;
+      const pt = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+        t: e.timeStamp / 1000.0,
+        p: p
+      };
+      currentStroke.points.push(pt);
+      redraw();
+      pressureInd.textContent = `필압: ${p.toFixed(2)}`;
+    });
+
+    function endStroke(e) {
+      if (!isDrawing) return;
+      isDrawing = false;
+      currentStroke = null;
+      updatePromptUI();
+    }
+
+    canvas.addEventListener("pointerup", endStroke);
+    canvas.addEventListener("pointercancel", endStroke);
+
+    // Controls
+    document.getElementById("btnClear").addEventListener("click", () => {
+      strokes = [];
+      redraw();
+      updatePromptUI();
+    });
+
+    document.getElementById("btnUndo").addEventListener("click", () => {
+      if (strokes.length > 0) {
+        strokes.pop();
+        redraw();
+        updatePromptUI();
+      }
+    });
+
+    function saveCurrent() {
+      if (strokes.length > 0) {
+        collectedData.push({
+          text: PROMPTS[currentPromptIdx],
+          prompt_idx: currentPromptIdx,
+          writer: writerInput.value.trim() || "unknown",
+          strokes: strokes.map(s => ({
+            x: s.points.map(p => Math.round(p.x * 100) / 100),
+            y: s.points.map(p => Math.round(p.y * 100) / 100),
+            t: s.points.map(p => Math.round(p.t * 1000) / 1000),
+            p: s.points.map(p => Math.round(p.p * 1000) / 1000)
+          }))
+        });
+      }
+    }
+
+    document.getElementById("btnNext").addEventListener("click", () => {
+      saveCurrent();
+      strokes = [];
+      if (currentPromptIdx < PROMPTS.length - 1) {
+        currentPromptIdx++;
+      }
+      updatePromptUI();
+      redraw();
+    });
+
+    document.getElementById("btnPrev").addEventListener("click", () => {
+      if (currentPromptIdx > 0) {
+        currentPromptIdx--;
+        strokes = [];
+        updatePromptUI();
+        redraw();
+      }
+    });
+
+    document.getElementById("btnExport").addEventListener("click", () => {
+      saveCurrent();
+      if (collectedData.length === 0) {
+        alert("수집된 필기 데이터가 없습니다.");
+        return;
+      }
+      const exportObj = {
+        format: "vibefont-collector/1",
+        writer: writerInput.value.trim() || "unknown",
+        exported_at: new Date().toISOString(),
+        items: collectedData
+      };
+      const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `vibefont_${exportObj.writer}_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Init
+    resize();
+    updatePromptUI();
+  </script>
+</body>
+</html>

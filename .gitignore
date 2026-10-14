@@ -39,3 +39,7 @@ Thumbs.db
 # Logs & Wandb
 logs/
 wandb/
+
+# Scratch & local tests
+scratch/
+

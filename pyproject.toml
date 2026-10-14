@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibefont"
+version = "0.1.0"
+description = "Text + vibe prompt -> naturally varying handwriting (stroke model + procedural ink renderer)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+# Runtime deps are deliberately tiny so inference runs on any CPU-only machine.
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+# Low-spec inference of the trained model (CPU / DirectML / WebGPU via onnxruntime)
+infer = ["onnxruntime>=1.17"]
+# Training (install torch separately with the CUDA index URL that matches your GPU)
+train = ["torch>=2.7", "onnx>=1.16"]
+placeholder = ["Hershey-Fonts>=2.1"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+vibefont = "vibefont.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
