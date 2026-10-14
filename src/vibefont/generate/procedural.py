@@ -18,6 +18,7 @@ from ..ink import P, Ink
 from ..preprocess import pseudo_pressure
 from ..vibe.spec import StyleSpec
 from .base import LineRequest
+from .hangul import hangul_char_strokes, is_hangul
 from .kinematics import densify, strokes_to_ink
 
 
@@ -34,15 +35,72 @@ class _Font:
         self._cache: dict[str, float] = {}
 
     def word(self, word: str) -> tuple[list[np.ndarray], float]:
-        strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(word)]
-        strokes = [s for s in strokes if len(s)]
-        if not strokes:
+        if not any(is_hangul(c) for c in word):
+            strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(word)]
+            strokes = [s for s in strokes if len(s)]
+            if not strokes:
+                return [], 0.6 * len(word)
+            allp = np.concatenate(strokes)
+            x0 = allp[:, 0].min()
+            out = [np.stack([(s[:, 0] - x0) / self.xh, (s[:, 1] - self.base) / self.xh], axis=1) for s in strokes]
+            width = (allp[:, 0].max() - x0) / self.xh
+            return out, float(width)
+
+        # Mixed or pure Hangul
+        runs: list[tuple[bool, str]] = []
+        cur_h: bool | None = None
+        cur_text: list[str] = []
+        for ch in word:
+            h = is_hangul(ch)
+            if cur_h is None or h == cur_h:
+                cur_h = h
+                cur_text.append(ch)
+            else:
+                runs.append((cur_h, "".join(cur_text)))
+                cur_h = h
+                cur_text = [ch]
+        if cur_text and cur_h is not None:
+            runs.append((cur_h, "".join(cur_text)))
+
+        all_strokes: list[np.ndarray] = []
+        cursor_x = 0.0
+        gap = 0.05
+
+        for is_h, text in runs:
+            if is_h:
+                for ch in text:
+                    ch_strokes = hangul_char_strokes(ch)
+                    if ch_strokes:
+                        for s in ch_strokes:
+                            sp = s.copy()
+                            sp[:, 0] += cursor_x
+                            all_strokes.append(sp)
+                        cursor_x += 1.0 + gap
+                    else:
+                        cursor_x += 0.6
+            else:
+                h_strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(text)]
+                h_strokes = [s for s in h_strokes if len(s)]
+                if h_strokes:
+                    allp = np.concatenate(h_strokes)
+                    x0 = allp[:, 0].min()
+                    w = (allp[:, 0].max() - x0) / self.xh
+                    for s in h_strokes:
+                        sp = np.stack([(s[:, 0] - x0) / self.xh + cursor_x, (s[:, 1] - self.base) / self.xh], axis=1)
+                        all_strokes.append(sp)
+                    cursor_x += w + gap
+                else:
+                    cursor_x += 0.6 * len(text)
+
+        if not all_strokes:
             return [], 0.6 * len(word)
-        allp = np.concatenate(strokes)
-        x0 = allp[:, 0].min()
-        out = [np.stack([(s[:, 0] - x0) / self.xh, (s[:, 1] - self.base) / self.xh], axis=1) for s in strokes]
-        width = (allp[:, 0].max() - x0) / self.xh
-        return out, float(width)
+
+        allp = np.concatenate(all_strokes)
+        x0 = float(allp[:, 0].min())
+        for s in all_strokes:
+            s[:, 0] -= x0
+        total_width = float(allp[:, 0].max())
+        return all_strokes, max(total_width, 0.1)
 
     def width(self, word: str) -> float:
         if word not in self._cache:
