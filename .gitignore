@@ -42,4 +42,10 @@ wandb/
 
 # Scratch & local tests
 scratch/
+words.tgz.zip
+*.zip
+*.tgz
+*.tar.gz
+*OCR*/
+
 
