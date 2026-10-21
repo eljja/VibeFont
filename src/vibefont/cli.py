@@ -62,6 +62,15 @@ def cmd_interpret(args) -> None:
     print(json.dumps(spec.to_dict(), ensure_ascii=False, indent=2))
 
 
+def cmd_validate_data(args) -> None:
+    from .data.validator import validate_dataset
+
+    report = validate_dataset(args.path)
+    print(report.summary())
+    if not report.is_healthy:
+        sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="vibefont", description="text + vibe prompt -> handwriting")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -84,6 +93,10 @@ def main(argv: list[str] | None = None) -> None:
     i.add_argument("prompt")
     i.add_argument("--llm", action="store_true")
     i.set_defaults(func=cmd_interpret)
+
+    v = sub.add_parser("validate-data", help="validate dataset health and integrity")
+    v.add_argument("path", help="path to processed dataset directory")
+    v.set_defaults(func=cmd_validate_data)
 
     args = ap.parse_args(argv)
     args.func(args)
