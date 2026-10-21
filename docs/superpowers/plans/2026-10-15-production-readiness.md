@@ -42,21 +42,21 @@
 - Consumes: `vibefont.vibe.spec.StyleSpec`, `PIL.Image`
 - Produces: `extract_style_from_image(image: Image.Image | Path | str) -> StyleSpec`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   In `tests/test_vision_extractor.py`, create a synthetic black-and-white handwritten line image (slanted strokes with varied thickness), call `extract_style_from_image(img)`, and assert that it returns a valid `StyleSpec` with measured slant, thickness, and roundness.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `.venv\Scripts\pytest tests\test_vision_extractor.py -v`
   Expected: FAIL with `ModuleNotFoundError: No module named 'vibefont.vision'`
 
-- [ ] **Step 3: Implement `src/vibefont/vision/extractor.py`**
+- [x] **Step 3: Implement `src/vibefont/vision/extractor.py`**
   Implement binarization (Otsu threshold), contour extraction, stroke width estimation via distance transform, slant angle detection via horizontal run-length / PCA on stroke segments, and map to `StyleSpec`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `.venv\Scripts\pytest tests\test_vision_extractor.py -v`
   Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   ```bash
   git add src/vibefont/vision tests/test_vision_extractor.py
   git commit -m "feat(vision): add few-shot handwriting style extractor from reference images"
@@ -75,21 +75,21 @@
 - Consumes: `vibefont.dataset.LineStore`, raw dataset directories
 - Produces: `validate_dataset(path: Path) -> ValidationReport`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   In `tests/test_data_validator.py`, construct a valid `LineStore` and a corrupted `LineStore` (with NaN coordinates and non-monotonic time). Assert that `validate_dataset` returns `is_healthy=True` for valid and `is_healthy=False` with descriptive errors for corrupt.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `.venv\Scripts\pytest tests\test_data_validator.py -v`
   Expected: FAIL with `ModuleNotFoundError: No module named 'vibefont.data.validator'`
 
-- [ ] **Step 3: Implement `src/vibefont/data/validator.py`**
+- [x] **Step 3: Implement `src/vibefont/data/validator.py`**
   Implement validation logic: checks offsets consistency, bounds of coordinates, presence of NaNs/Infs, time monotonicity, text length vs stroke count ratio, and character vocabulary statistics. Wire `validate-data` into `cli.py`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `.venv\Scripts\pytest tests\test_data_validator.py -v`
   Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   ```bash
   git add src/vibefont/data/validator.py src/vibefont/cli.py tests/test_data_validator.py
   git commit -m "feat(data): add pre-flight dataset integrity validator"
@@ -110,17 +110,17 @@
 - Consumes: `vibefont.document.pipeline.write_document`, `vibefont.render.raster.render_page`, `vibefont.vibe.interpreter.interpret`
 - Produces: `create_server(host: str, port: int) -> HTTPServer`, CLI command `vibefont serve`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   In `tests/test_web_server.py`, test the HTTP request handler:
   - `POST /api/generate` with `{"text": "테스트", "prompt": "만년필"}` returns PNG base64 and VibeSpec.
   - `POST /api/interpret` returns parsed VibeSpec JSON.
   - `GET /` serves the Web Studio HTML.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
   Run: `.venv\Scripts\pytest tests\test_web_server.py -v`
   Expected: FAIL with `ModuleNotFoundError: No module named 'vibefont.web'`
 
-- [ ] **Step 3: Implement `src/vibefont/web/server.py` and `web/studio/index.html`**
+- [x] **Step 3: Implement `src/vibefont/web/server.py` and `web/studio/index.html`**
   - Implement Python `http.server.BaseHTTPRequestHandler` handling JSON API and static files.
   - Create a modern, responsive Web Studio UI in `web/studio/index.html` with:
     - Text input with bilingual presets (Hangul pangrams, English quotes).
@@ -129,11 +129,11 @@
     - Export buttons (Download PNG, PDF, SVG).
   - Add `serve` command to `src/vibefont/cli.py`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
   Run: `.venv\Scripts\pytest tests\test_web_server.py -v`
   Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
   ```bash
   git add src/vibefont/web web/studio src/vibefont/cli.py tests/test_web_server.py
   git commit -m "feat(web): add local interactive web studio and REST API server"
@@ -151,7 +151,7 @@
 - Consumes: `vibefont.cli.main`
 - Produces: Verified end-to-end user workflows
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   In `tests/test_cli_e2e.py`, test the complete CLI invocations via `subprocess`:
   - `vibefont write "bilingual test 다람쥐" -p "pencil" -o output.png`
   - `vibefont write "vector test" -o output.svg`
@@ -159,11 +159,11 @@
   - `vibefont export-onnx --checkpoint checkpoints/test_run/model.pt --output tmp_onnx/`
   - `vibefont validate-data data/processed/synthetic`
 
-- [ ] **Step 2: Run test to verify it passes all subcommands**
+- [x] **Step 2: Run test to verify it passes all subcommands**
   Run: `.venv\Scripts\pytest tests\test_cli_e2e.py -v`
   Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
   ```bash
   git add tests/test_cli_e2e.py
   git commit -m "test: add comprehensive end-to-end CLI integration test suite"
@@ -177,11 +177,11 @@
 - Create: `docs/USER_GUIDE.md`
 - Test: Full pytest suite
 
-- [ ] **Step 1: Run complete pytest suite**
+- [x] **Step 1: Run complete pytest suite**
   Run: `.venv\Scripts\pytest -v`
   Confirm 0 failures across all tests.
 
-- [ ] **Step 2: Create comprehensive `docs/USER_GUIDE.md`**
+- [x] **Step 2: Create comprehensive `docs/USER_GUIDE.md`**
   Document the complete workflow:
   - Running CLI `vibefont write` with examples.
   - Launching Web Studio `vibefont serve`.
@@ -190,7 +190,7 @@
   - Training on local RTX 5070 Ti with `train_core.py`.
   - Low-spec CPU & ONNX deployment with `export_onnx.py`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
   ```bash
   git add docs/USER_GUIDE.md
   git commit -m "docs: add comprehensive VibeFont user and operational guide"
