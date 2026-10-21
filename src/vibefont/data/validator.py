@@ -144,6 +144,16 @@ def validate_dataset(path: str | Path) -> ValidationReport:
             t_col = line_pts[:, 2]
             eos_col = line_pts[:, 4]
 
+            # Coordinate bounds check (normalized space: y in [-15, 15], x in [-5, 250])
+            if np.all(np.isfinite(line_pts[:, :2])):
+                xmin, xmax = float(line_pts[:, 0].min()), float(line_pts[:, 0].max())
+                ymin, ymax = float(line_pts[:, 1].min()), float(line_pts[:, 1].max())
+                if ymin < -15.0 or ymax > 15.0 or xmin < -5.0 or (xmax - xmin) > 250.0:
+                    errors.append(
+                        f"Line {i} has out-of-bounds coordinates (scale/bound error): "
+                        f"bbox=({xmin:.2f}, {ymin:.2f}, {xmax:.2f}, {ymax:.2f})"
+                    )
+
             # EOS values
             if not np.all(np.isin(eos_col, [0.0, 1.0])):
                 errors.append(f"Line {i} has invalid non-binary EOS values")

@@ -35,6 +35,7 @@ def _place(ink: Ink, spec: VibeSpec, st: LineState, x_mm: float, y_mm: float,
 
 def write_document(text: str, spec: VibeSpec, gen: StrokeGenerator, rng: np.random.Generator | None = None,
                    max_pages: int = 20) -> list[Page]:
+    text = text.replace("\\n", "\n")
     rng = rng or np.random.default_rng(spec.seed)
     w_mm, h_mm = page_size(spec)
     top, right, bottom, left = spec.layout.margin_mm

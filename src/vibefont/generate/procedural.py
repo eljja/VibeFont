@@ -14,7 +14,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from ..descriptors import slant_deg
-from ..ink import P, Ink
+from ..ink import P, X, Ink
 from ..preprocess import pseudo_pressure
 from ..vibe.spec import StyleSpec
 from .base import LineRequest
@@ -31,10 +31,28 @@ class _Font:
         xs = np.concatenate([np.asarray(s, float) for s in self.f.strokes_for_text("x")])
         self.base = xs[:, 1].max()
         self.xh = xs[:, 1].max() - xs[:, 1].min()
-        self.slant = slant_deg(Ink.from_strokes(self.word("lldhkbtf")[0]))
+        raw_l = [np.asarray(s, float) for s in self.f.strokes_for_text("lldhkbtf") if len(s)]
+        norm_l = [np.stack([(s[:, 0]) / self.xh, (s[:, 1] - self.base) / self.xh], axis=1) for s in raw_l]
+        self.slant = slant_deg(Ink.from_strokes(norm_l))
+        self._k_unslant = float(np.tan(np.radians(self.slant)))
         self._cache: dict[str, float] = {}
 
-    def word(self, word: str) -> tuple[list[np.ndarray], float]:
+    def _norm_hershey(self, strokes: list[np.ndarray], x0: float) -> list[np.ndarray]:
+        out = []
+        for s in strokes:
+            nx = (s[:, 0] - x0) / self.xh
+            ny = (s[:, 1] - self.base) / self.xh
+            # Remove Hershey's intrinsic slant so both Latin and Hangul are in upright 0-deg space
+            nx = nx + self._k_unslant * ny
+            out.append(np.stack([nx, ny], axis=1))
+        return out
+
+    def word(
+        self,
+        word: str,
+        rng: np.random.Generator | None = None,
+        connectedness: float = 0.5,
+    ) -> tuple[list[np.ndarray], float]:
         if not any(is_hangul(c) for c in word):
             strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(word)]
             strokes = [s for s in strokes if len(s)]
@@ -42,9 +60,13 @@ class _Font:
                 return [], 0.6 * len(word)
             allp = np.concatenate(strokes)
             x0 = allp[:, 0].min()
-            out = [np.stack([(s[:, 0] - x0) / self.xh, (s[:, 1] - self.base) / self.xh], axis=1) for s in strokes]
-            width = (allp[:, 0].max() - x0) / self.xh
-            return out, float(width)
+            out = self._norm_hershey(strokes, x0)
+            all_norm = np.concatenate(out)
+            min_x = float(all_norm[:, 0].min())
+            for s in out:
+                s[:, 0] -= min_x
+            width = float(all_norm[:, 0].max() - min_x)
+            return out, max(width, 0.1)
 
         # Mixed or pure Hangul
         runs: list[tuple[bool, str]] = []
@@ -64,29 +86,35 @@ class _Font:
 
         all_strokes: list[np.ndarray] = []
         cursor_x = 0.0
-        gap = 0.05
+        gap = 0.24
 
         for is_h, text in runs:
             if is_h:
                 for ch in text:
-                    ch_strokes = hangul_char_strokes(ch)
+                    ch_strokes = hangul_char_strokes(ch, rng=rng, connectedness=connectedness)
                     if ch_strokes:
+                        ch_pts = np.concatenate(ch_strokes, axis=0)
+                        ch_x0 = float(ch_pts[:, 0].min())
+                        ch_w = float(ch_pts[:, 0].max() - ch_x0)
                         for s in ch_strokes:
                             sp = s.copy()
-                            sp[:, 0] += cursor_x
+                            sp[:, 0] = (sp[:, 0] - ch_x0) + cursor_x
                             all_strokes.append(sp)
-                        cursor_x += 1.0 + gap
+                        cursor_x += max(ch_w, 1.35) + gap
                     else:
-                        cursor_x += 0.6
+                        cursor_x += 0.9
             else:
                 h_strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(text)]
                 h_strokes = [s for s in h_strokes if len(s)]
                 if h_strokes:
                     allp = np.concatenate(h_strokes)
                     x0 = allp[:, 0].min()
-                    w = (allp[:, 0].max() - x0) / self.xh
-                    for s in h_strokes:
-                        sp = np.stack([(s[:, 0] - x0) / self.xh + cursor_x, (s[:, 1] - self.base) / self.xh], axis=1)
+                    norm_s = self._norm_hershey(h_strokes, x0)
+                    all_n = np.concatenate(norm_s)
+                    min_nx = float(all_n[:, 0].min())
+                    w = float(all_n[:, 0].max() - min_nx)
+                    for s in norm_s:
+                        sp = np.stack([s[:, 0] - min_nx + cursor_x, s[:, 1]], axis=1)
                         all_strokes.append(sp)
                     cursor_x += w + gap
                 else:
@@ -156,7 +184,7 @@ class ProceduralGenerator:
         all_strokes: list[np.ndarray] = []
         cursor = 0.0
         for word in req.text.split():
-            strokes, width = f.word(word)
+            strokes, width = f.word(word, rng=rng, connectedness=st.connectedness)
             if not strokes:
                 cursor += width
                 continue
@@ -171,7 +199,8 @@ class ProceduralGenerator:
             # per-word jitter
             sc = float(np.exp(rng.normal(0.0, 0.02 + 0.04 * loose)))
             rot = np.radians(rng.normal(0.0, 0.5 + 1.5 * loose))
-            slant = ls.slant_deg - f.slant + rng.normal(0.0, 1.0 + 2.5 * (1 - st.consistency))
+            base_slant = 0.45 * ls.slant_deg if any(is_hangul(c) for c in word) else ls.slant_deg
+            slant = base_slant + rng.normal(0.0, 1.0 + 2.5 * (1 - st.consistency))
             k = np.tan(np.radians(slant))
             dy = rng.normal(0.0, 0.03 + 0.08 * st.baseline_wobble)
             sx = st.width_scale * st.letter_spacing
@@ -191,6 +220,9 @@ class ProceduralGenerator:
             # micro tremor along the stroke (smoothed noise)
             trem = gaussian_filter1d(rng.standard_normal((len(ink), 2)), 3.0, axis=0) * (0.004 + 0.01 * loose)
             ink.points[:, :2] += trem.astype(np.float32)
+            xmin = float(ink.points[:, X].min())
+            if xmin < 0.0:
+                ink.points[:, X] -= xmin
             ink.points[:, P] = np.clip(pseudo_pressure(ink) * (0.6 + 0.8 * st.pressure), 0.02, 1.0)
         ink.meta["generator"] = self.name
         return ink

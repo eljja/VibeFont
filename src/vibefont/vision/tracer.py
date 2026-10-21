@@ -2,20 +2,20 @@
 
 Converts offline handwriting images (IAM words, Korean OCR syllables/words) into
 online stroke trajectories (x, y, t, p, eos) with natural writing order heuristics,
-power-law kinematics, and uniform time resampling.
+2/3 power-law kinematics, Gaussian path smoothing, and corpus-aware normalization.
 """
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from PIL import Image
 import scipy.ndimage as ndi
 
 from ..ink import EOS, NCOLS, P, T, X, Y, Ink
-from ..preprocess import normalize_line, resample_time
+from ..preprocess import resample_time
 
 
 def zhang_suen_thinning(binary: np.ndarray) -> np.ndarray:
@@ -61,7 +61,7 @@ def zhang_suen_thinning(binary: np.ndarray) -> np.ndarray:
 
 
 def _extract_strokes_from_skeleton(skel: np.ndarray, dist_map: np.ndarray) -> list[np.ndarray]:
-    """Traces 1D paths from a binary skeleton image."""
+    """Traces 1D paths from a binary skeleton image with smoothing and 2/3 power-law kinematics."""
     rows, cols = np.where(skel > 0)
     if len(rows) == 0:
         return []
@@ -69,7 +69,6 @@ def _extract_strokes_from_skeleton(skel: np.ndarray, dist_map: np.ndarray) -> li
     pts_set = set(zip(rows, cols))
     visited = set()
 
-    # Precompute degrees (8-connectivity)
     def get_neighbors(r: int, c: int) -> list[tuple[int, int]]:
         nbrs = []
         for dr in (-1, 0, 1):
@@ -83,7 +82,7 @@ def _extract_strokes_from_skeleton(skel: np.ndarray, dist_map: np.ndarray) -> li
 
     degrees = {pt: len(get_neighbors(pt[0], pt[1])) for pt in pts_set}
 
-    # Find starting points: prioritize endpoints (degree 1) sorted top-to-bottom, left-to-right
+    # Prioritize endpoints (degree 1) sorted top-to-bottom, left-to-right
     endpoints = [pt for pt, deg in degrees.items() if deg == 1]
     endpoints.sort(key=lambda pt: (pt[0] * 1.5 + pt[1]))
 
@@ -100,7 +99,6 @@ def _extract_strokes_from_skeleton(skel: np.ndarray, dist_map: np.ndarray) -> li
             unvisited_nbrs = [n for n in get_neighbors(cur[0], cur[1]) if n not in visited]
             if not unvisited_nbrs:
                 break
-            # Choose neighbor closest to current direction or top-to-bottom
             if len(path) > 1:
                 prev = path[-2]
                 v_cur = (cur[0] - prev[0], cur[1] - prev[1])
@@ -139,10 +137,9 @@ def _extract_strokes_from_skeleton(skel: np.ndarray, dist_map: np.ndarray) -> li
         if len(path) >= 2:
             strokes.append(path)
 
-    # Sort strokes in natural writing sequence (left-to-right, top-to-bottom)
+    # Sort strokes in natural writing order (left-to-right primary, top-to-bottom secondary)
     strokes.sort(key=lambda st: (st[0][1] * 0.8 + st[0][0] * 1.2))
 
-    # Convert paths to (M, 5) float32 strokes with simulated timestamps and pressure
     current_time = 0.0
     out_strokes = []
 
@@ -150,20 +147,32 @@ def _extract_strokes_from_skeleton(skel: np.ndarray, dist_map: np.ndarray) -> li
         coords = np.array([[c, r] for r, c in path], dtype=np.float64)  # (x, y)
         n = len(coords)
 
-        # Distance transform values at path pixels
+        # Smooth 1-pixel staircase grid artifacts
+        if n >= 4:
+            coords[:, 0] = ndi.gaussian_filter1d(coords[:, 0], sigma=1.1, mode="nearest")
+            coords[:, 1] = ndi.gaussian_filter1d(coords[:, 1], sigma=1.1, mode="nearest")
+
         d_vals = np.array([dist_map[r, c] for r, c in path], dtype=np.float64)
         median_d = np.median(d_vals) if len(d_vals) else 1.0
         p = np.clip(d_vals / max(median_d, 1e-4) * 0.5, 0.1, 0.95)
+        if n >= 4:
+            p = ndi.gaussian_filter1d(p, sigma=1.0, mode="nearest")
 
-        # Kinematics: arc length + curvature determines dt
+        # 2/3 power-law kinematics: speed slows down at high curvature
         diffs = np.diff(coords, axis=0)
         seg_lens = np.linalg.norm(diffs, axis=1)
+        if n >= 3:
+            tangents = diffs / np.maximum(seg_lens[:, None], 1e-5)
+            d_tan = np.linalg.norm(np.diff(tangents, axis=0), axis=1)
+            curv = np.concatenate([[d_tan[0]], d_tan]) / np.maximum(seg_lens, 0.5)
+        else:
+            curv = np.zeros(len(seg_lens))
 
-        # Base writing speed ~ 200 pixels/sec
-        v_base = 200.0
-        dt_segs = np.maximum(seg_lens / v_base, 0.005)
+        v_base = 220.0
+        v_inst = v_base * np.power(1.0 + 3.0 * np.clip(curv, 0.0, 10.0), -1.0 / 3.0)
+        dt_segs = np.maximum(seg_lens / np.maximum(v_inst, 20.0), 0.004)
         times = np.concatenate([[current_time], current_time + np.cumsum(dt_segs)])
-        current_time = times[-1] + 0.08  # 80ms pen-up pause between strokes
+        current_time = times[-1] + 0.06  # 60ms pen-up transition
 
         eos = np.zeros(n, dtype=np.float64)
         eos[-1] = 1.0
@@ -179,8 +188,66 @@ def _extract_strokes_from_skeleton(skel: np.ndarray, dist_map: np.ndarray) -> li
     return out_strokes
 
 
+def _has_hangul(text: str) -> bool:
+    return any(
+        (0xAC00 <= ord(c) <= 0xD7A3) or (0x3130 <= ord(c) <= 0x318F) or (0x1100 <= ord(c) <= 0x11FF)
+        for c in text
+    )
+
+
+def normalize_cropped_ink(ink: Ink, text: str = "") -> Ink:
+    """Normalizes a horizontally-oriented cropped word/character Ink into model space.
+
+    Model space: baseline at y == 0, x_min at x == 0, x-height == 1.0, y grows downward.
+    Avoids unconstrained linear regression on extrema so single characters or short words
+    with punctuation ('MR.', '가') never rotate wildly or explode in scale.
+    """
+    if len(ink) == 0:
+        return ink
+
+    pts = ink.points
+    x = pts[:, X]
+    y = pts[:, Y]
+
+    if len(y) >= 20:
+        y_top = float(np.percentile(y, 2))
+        y_bot = float(np.percentile(y, 98))
+    else:
+        y_top = float(y.min())
+        y_bot = float(y.max())
+
+    span_y = max(y_bot - y_top, float(np.ptp(y)), 1.0)
+    x_min = float(x.min())
+
+    if _has_hangul(text):
+        # Hangul syllable blocks sit from ~ -1.45 (top) to +0.10 (bottom) relative to Latin baseline
+        base_y = y_top + 0.93 * span_y
+        x_height = span_y / 1.55
+    else:
+        has_asc = any(c.isupper() or c in "bdfhklt0123456789!?" for c in text)
+        has_desc = any(c in "gjpqy" for c in text)
+        if has_asc and has_desc:
+            base_y = y_top + (1.6 / 2.2) * span_y
+            x_height = span_y / 2.2
+        elif has_asc:
+            base_y = y_bot - 0.04 * span_y
+            x_height = span_y / 1.65
+        elif has_desc:
+            base_y = y_top + (1.0 / 1.6) * span_y
+            x_height = span_y / 1.6
+        else:
+            base_y = y_bot - 0.04 * span_y
+            x_height = span_y / 1.08
+
+    x_height = max(x_height, 2.0)
+    out = ink.translate(-x_min, -base_y).scale(1.0 / x_height)
+    if len(out):
+        out.points[:, T] -= out.points[0, T]
+    return out
+
+
 def trace_image_to_ink(
-    img_or_path: Image.Image | np.ndarray | str | Path,
+    img_or_path: Image.Image | np.ndarray | str | Path | bytes,
     text: str = "",
     hz: float = 100.0,
 ) -> Ink:
@@ -188,7 +255,6 @@ def trace_image_to_ink(
     if isinstance(img_or_path, (str, Path)):
         img = Image.open(img_or_path).convert("L")
     elif isinstance(img_or_path, bytes):
-        import io
         img = Image.open(io.BytesIO(img_or_path)).convert("L")
     elif isinstance(img_or_path, Image.Image):
         img = img_or_path.convert("L")
@@ -197,22 +263,14 @@ def trace_image_to_ink(
 
     arr = np.array(img, dtype=np.float32)
 
-    # Automatic thresholding: Otsu or percentile
-    # For scanned documents, paper is bright (>128) and ink is dark (<128)
     p20, p80 = np.percentile(arr, [20, 80])
     threshold = (p20 + p80) * 0.5
     binary_ink = (arr < threshold).astype(np.uint8)
 
-    # Clean small isolated noise pixels
     binary_ink = ndi.binary_opening(binary_ink, structure=np.ones((2, 2)))
-
-    # Compute Euclidean distance transform
     dist_map = ndi.distance_transform_edt(binary_ink)
-
-    # Morphological skeletonization
     skel = zhang_suen_thinning(binary_ink)
 
-    # Extract strokes
     strokes = _extract_strokes_from_skeleton(skel, dist_map)
     if not strokes:
         return Ink(np.zeros((0, NCOLS), dtype=np.float32), text=text)
@@ -220,10 +278,8 @@ def trace_image_to_ink(
     all_pts = np.concatenate(strokes, axis=0)
     raw_ink = Ink(all_pts, text=text)
 
-    # Resample to uniform time and normalize
     resampled = resample_time(raw_ink, hz=hz)
     if len(resampled) < 2:
-        return raw_ink
+        return normalize_cropped_ink(raw_ink, text=text)
 
-    normalized, _ = normalize_line(resampled)
-    return normalized
+    return normalize_cropped_ink(resampled, text=text)

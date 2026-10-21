@@ -64,7 +64,7 @@ def test_cli_interpret(run_cli):
 
 def test_cli_validate_data_command(run_cli):
     # Test on existing processed dataset
-    res = run_cli("validate-data", "data/processed/real_bilingual")
+    res = run_cli("validate-data", "data/processed/bilingual_5k")
     assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     assert "Dataset Health: [HEALTHY]" in res.stdout
     assert "Hangul=" in res.stdout

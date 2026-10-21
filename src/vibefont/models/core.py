@@ -260,7 +260,8 @@ class CoreModel(nn.Module):
         losses = {"pen": ce(o["pen"], tgt[..., 3], m), "dx": ce(o["dx"], tgt[..., 0], m),
                   "dy": ce(o["dy"], tgt[..., 1], m), "dt": ce(o["dt"], tgt[..., 2], m)}
         if batch.get("adv") is not None:
-            losses["adv"] = ce(o["adv"], batch["adv"], m)
+            adv_w = m * torch.where(batch["adv"] == 1, 4.0, 1.0)
+            losses["adv"] = ce(o["adv"], batch["adv"], adv_w)
         losses["loss"] = sum(losses.values())
         del down
         return losses
@@ -276,12 +277,17 @@ class CoreModel(nn.Module):
         """
         self.eval()
         c, dev = self.c, text.device
+        L = text.shape[1]
+        last_char = max(1, L - 2)
+        cur_char = torch.ones((1, 1), dtype=torch.long, device=dev)
+        steps_on_char = 0
+
         mem = self.encode_text(text, torch.ones_like(text, dtype=torch.bool))
         kvs = [blk.ca.memory_kv(mem) for blk in self.blocks]
         parts = [self.style_tokens(z, desc)]
         if ctx is not None and ctx.shape[1] > 0:
             parts.append(self.embed_points(ctx, self.SEG_CTX))
-        parts.append(self.bos.view(1, 1, -1))
+        parts.append(self.bos.view(1, 1, -1) + self.pointer_cond(mem, cur_char))
         x = torch.cat(parts, 1)
         caches: list = [(None, None)] * len(self.blocks)
         pos = 0
@@ -292,7 +298,7 @@ class CoreModel(nn.Module):
             p = F.softmax(logits.float() / tau, -1)
             return torch.multinomial(p, 1, generator=generator)[:, 0]
 
-        for _ in range(max_points):
+        for step_idx in range(max_points):
             T = x.shape[1]
             cos, sin = rope(torch.arange(pos, pos + T, device=dev), c.d_model // c.n_heads)
             h = x
@@ -301,15 +307,101 @@ class CoreModel(nn.Module):
             pos += T
             h = self.norm(h[:, -1])
             o = self.heads(h)
-            pen, dx = sample(o["pen"]), sample(o["dx"])
+            steps_on_char += 1
+
+            pen_logits = o["pen"].clone()
+            if int(cur_char) < last_char or steps_on_char < 4:
+                pen_logits[:, 2] = -1e9
+
+            pen, dx = sample(pen_logits), sample(o["dx"])
             dy = sample(self.h_dy(h + self.c_dx(dx)))
             dt = sample(self.h_dt(h + self.c_dx(dx) + self.c_dy(dy)))
+
+            p_adv = float(F.softmax(o["adv"].float() / tau, -1)[0, 1])
+            should_adv = (steps_on_char >= 4 and p_adv > 0.5) or (steps_on_char >= 24)
+            if should_adv:
+                if int(cur_char) < last_char:
+                    cur_char = cur_char + 1
+                    steps_on_char = 0
+                elif steps_on_char >= 10 or p_adv > 0.65:
+                    pen = torch.tensor([2], dtype=torch.long, device=dev)
+
+            if step_idx == max_points - 1:
+                pen = torch.tensor([2], dtype=torch.long, device=dev)
+
             tok = torch.stack([dx, dy, dt, pen], -1)  # (1, 4)
             out.append(tok[0])
             if int(pen) == 2:
                 break
-            x = self.embed_points(tok[:, None], self.SEG_TGT)
+            x = self.embed_points(tok[:, None], self.SEG_TGT) + self.pointer_cond(mem, cur_char)
         return torch.stack(out) if out else torch.zeros(0, 4, dtype=torch.long, device=dev)
+
+    @torch.no_grad()
+    def modulate(
+        self,
+        text: torch.Tensor,
+        z: torch.Tensor,
+        desc: torch.Tensor,
+        base_toks: torch.Tensor,
+        ctx: torch.Tensor | None = None,
+        temperature: float = 0.85,
+        sigma_bins: float = 1.8,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        """Neural posterior modulation over a structural token trajectory (1, N, 4).
+
+        Evaluates the trained Transformer encoder + RoPE causal decoder (conditioned on
+        style latent `z`, descriptor `desc`, previous-line context `ctx`, and monotonic
+        pointer `char_idx`) and samples (dx, dy, dt) from the product of the trained
+        neural heads and a Gaussian locality prior around `base_toks`.
+        """
+        self.eval()
+        c, dev = self.c, text.device
+        B, N, _ = base_toks.shape
+        if N == 0:
+            return base_toks[0]
+
+        mem = self.encode_text(text, torch.ones_like(text, dtype=torch.bool))
+        M = max(1, text.shape[1] - 2)
+        t_idx = torch.arange(N, device=dev, dtype=torch.long)[None, :]
+        char_idx = (1 + (t_idx * M) // N).clamp(1, M)
+
+        parts = [self.style_tokens(z, desc)]
+        if ctx is not None and ctx.shape[1] > 0:
+            parts.append(self.embed_points(ctx, self.SEG_CTX))
+
+        if N > 1:
+            tgt_prev = self.embed_points(base_toks[:, :-1], self.SEG_TGT)
+            tgt_in = torch.cat([self.bos.view(1, 1, -1), tgt_prev], dim=1)
+        else:
+            tgt_in = self.bos.view(1, 1, -1)
+        tgt_in = tgt_in + self.pointer_cond(mem, char_idx)
+        parts.append(tgt_in)
+
+        x = torch.cat(parts, dim=1)
+        T = x.shape[1]
+        cos, sin = rope(torch.arange(T, device=dev), c.d_model // c.n_heads)
+        for blk in self.blocks:
+            x, _ = blk(x, cos, sin, blk.ca.memory_kv(mem), None, None)
+        h = self.norm(x[:, -N:])
+
+        tau = max(temperature, 0.1)
+        pen = base_toks[..., 3]
+        sig_xy = torch.where(pen == 0, float(sigma_bins), 0.20)[..., None]
+
+        def sample_near(logits: torch.Tensor, center_idx: torch.Tensor, sig: torch.Tensor | float) -> torch.Tensor:
+            bins = torch.arange(logits.shape[-1], device=dev, dtype=torch.float32)[None, None, :]
+            center = center_idx.float()[..., None]
+            prior = -0.5 * ((bins - center) / sig) ** 2
+            post = logits.float() / tau + prior
+            probs = F.softmax(post, dim=-1).reshape(N, -1)
+            return torch.multinomial(probs, 1, generator=generator).reshape(1, N)
+
+        dx = sample_near(self.h_dx(h), base_toks[..., 0], sig_xy)
+        dy = sample_near(self.h_dy(h + self.c_dx(dx)), base_toks[..., 1], sig_xy)
+        dt = sample_near(self.h_dt(h + self.c_dx(dx) + self.c_dy(dy)), base_toks[..., 2], max(float(sigma_bins), 1.5))
+
+        return torch.stack([dx[0], dy[0], dt[0], pen[0]], dim=-1)
 
 
 def count_params(m: nn.Module) -> int:

@@ -139,12 +139,13 @@ def main():
 
             if (step + 1) % 25 == 0 or (step + 1) == len(train_loader):
                 pen_l = losses["pen"].item()
+                adv_l = losses["adv"].item() if "adv" in losses else 0.0
                 dx_l = losses["dx"].item()
                 dy_l = losses["dy"].item()
                 dt_l = losses["dt"].item()
                 print(
                     f"Epoch {epoch:02d}/{args.epochs:02d} [{step+1:03d}/{len(train_loader):03d}] "
-                    f"Loss: {loss.item():.4f} (pen:{pen_l:.3f} dx:{dx_l:.3f} dy:{dy_l:.3f} dt:{dt_l:.3f}) "
+                    f"Loss: {loss.item():.4f} (pen:{pen_l:.3f} adv:{adv_l:.3f} dx:{dx_l:.3f} dy:{dy_l:.3f} dt:{dt_l:.3f}) "
                     f"LR: {lr:.2e}",
                     flush=True,
                 )

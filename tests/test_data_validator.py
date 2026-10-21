@@ -76,3 +76,22 @@ def test_validator_detects_non_monotonic_time(tmp_path: Path):
     report = validate_dataset(ds_dir)
     assert report.is_healthy is False
     assert any("time" in err.lower() or "timestamp" in err.lower() or "monotonic" in err.lower() for err in report.errors)
+
+
+def test_validator_rejects_exploded_coordinates(tmp_path: Path):
+    ds_dir = tmp_path / "exploded"
+    writer = DatasetWriter(ds_dir)
+
+    pts = np.array([
+        [54.5, -369.5, 0.0, 0.5, 0.0],
+        [700.0, 100.0, 0.01, 0.5, 0.0],
+        [1415.4, 540.8, 0.02, 0.5, 1.0],
+    ], dtype=np.float32)
+    ink = Ink(pts, "MR.")
+    writer.add(ink, "w1", "doc1", 0, "iam_words")
+    writer.close()
+
+    report = validate_dataset(ds_dir)
+    assert report.is_healthy is False
+    assert any("bound" in err.lower() or "coord" in err.lower() or "scale" in err.lower() for err in report.errors)
+
