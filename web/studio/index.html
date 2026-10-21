@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VibeFont Studio - 자연스러운 손글씨 생성기</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #1a1d27;
+      --border: #2a2f42;
+      --text: #e2e8f0;
+      --text-muted: #8892b0;
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --accent: #06b6d4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+    header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 1.25rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 0.5rem; }
+    header h1 span { color: var(--accent); font-weight: 400; font-size: 0.9rem; }
+    .container { display: flex; flex: 1; height: calc(100vh - 65px); }
+    .sidebar { width: 440px; background: var(--panel); border-right: 1px solid var(--border); padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem; }
+    .preview { flex: 1; background: #0b0d13; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 2rem; overflow-y: auto; gap: 2rem; }
+    
+    label { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.35rem; }
+    textarea, input[type="text"] { width: 100%; background: #0f111a; border: 1px solid var(--border); border-radius: 6px; color: #fff; padding: 0.65rem; font-size: 0.95rem; }
+    textarea:focus, input[type="text"]:focus { outline: none; border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
+    
+    .pills { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+    .pill { background: #23283a; border: 1px solid var(--border); color: #cbd5e1; font-size: 0.75rem; padding: 0.3rem 0.6rem; border-radius: 9999px; cursor: pointer; transition: all 0.15s ease; }
+    .pill:hover { background: var(--primary); border-color: var(--primary); color: #fff; }
+    
+    .row { display: flex; gap: 0.75rem; }
+    .col { flex: 1; }
+    select { width: 100%; background: #0f111a; border: 1px solid var(--border); border-radius: 6px; color: #fff; padding: 0.6rem; font-size: 0.9rem; }
+    
+    .btn { background: var(--primary); color: #fff; border: none; padding: 0.75rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.15s ease; width: 100%; font-size: 1rem; }
+    .btn:hover { background: var(--primary-hover); }
+    .btn-secondary { background: #252b3d; color: #cbd5e1; border: 1px solid var(--border); }
+    .btn-secondary:hover { background: #2f374e; color: #fff; }
+    
+    .style-upload { border: 1px dashed var(--border); padding: 1rem; border-radius: 6px; text-align: center; cursor: pointer; background: #131622; transition: border-color 0.15s; }
+    .style-upload:hover { border-color: var(--accent); }
+    .style-upload input { display: none; }
+    
+    .page-card { box-shadow: 0 10px 30px rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; max-width: 100%; border: 1px solid #23283a; }
+    .page-card img { display: block; width: 100%; height: auto; }
+    
+    .status-bar { font-size: 0.8rem; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>✒️ VibeFont Studio <span>Dual-Track Bilingual Handwriting Synthesis</span></h1>
+    <div id="statusInfo" class="status-bar">준비 완료</div>
+  </header>
+  <div class="container">
+    <div class="sidebar">
+      <div>
+        <label>손글씨로 작성할 텍스트 (한국어 / English)</label>
+        <textarea id="textInput" placeholder="작성할 글을 입력하세요...">다람쥐 헌 쳇바퀴에 타고파.
+The quick brown fox jumps over the lazy dog.
+VibeFont는 사람 손글씨처럼 매 글자마다 고유한 생명력을 지닙니다.</textarea>
+        <div class="pills">
+          <span class="pill" onclick="setText('한글 판그램', '다람쥐 헌 쳇바퀴에 타고파. 키스의 고유조건은 입술끼리 만나야 하고 특별한 기술은 필요치 않다.')">한글 예문</span>
+          <span class="pill" onclick="setText('영어 명언', 'The quick brown fox jumps over the lazy dog. Hand writing is a reflection of human soul and feeling.')">English Quote</span>
+          <span class="pill" onclick="setText('편지글', '보고 싶은 친구에게,\n\n오랜만에 펜을 들었어. 바람이 참 선선한 가을 저녁이네.\n늘 건강하고 행복하길 바라며.')">편지글</span>
+        </div>
+      </div>
+
+      <div>
+        <label>바이브 프롬프트 (Vibe Prompt)</label>
+        <input type="text" id="promptInput" value="만년필로 단정하게 쓴 편지" placeholder='예: "급하게 쓴 만년필 메모", "연필", "흘려쓴 캘리그라피"'>
+        <div class="pills">
+          <span class="pill" onclick="setPrompt('만년필로 단정하게 쓴 편지')">✒️ 만년필</span>
+          <span class="pill" onclick="setPrompt('부드러운 볼펜으로 빠르게 휘갈겨 쓴 메모')">🖊️ 빠른 볼펜</span>
+          <span class="pill" onclick="setPrompt('진한 4B 연필로 스케치하듯 쓴 손글씨')">✏️ 4B 연필</span>
+          <span class="pill" onclick="setPrompt('우아한 파란색 잉크의 딥펜 캘리그라피')">🖋️ 딥펜 캘리</span>
+        </div>
+      </div>
+
+      <div>
+        <label>사진 필체 복제 (Track B Reference Style)</label>
+        <div class="style-upload" onclick="document.getElementById('styleFile').click()">
+          <span id="uploadLabel">📷 손글씨 사진 업로드하여 필체 추출</span>
+          <input type="file" id="styleFile" accept="image/*" onchange="handleStyleUpload(event)">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label>생성 엔진</label>
+          <select id="genSelect">
+            <option value="auto">Auto (Procedural + Model)</option>
+            <option value="procedural">절차적 물리 모형 (Fast CPU)</option>
+            <option value="model">신경망 코어 (Neural)</option>
+          </select>
+        </div>
+        <div class="col">
+          <label>용지 규격</label>
+          <select id="pageSelect">
+            <option value="A4">A4 용지</option>
+            <option value="A5">A5 노트</option>
+            <option value="Letter">Letter</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="genBtn" class="btn" onclick="generate()">손글씨 작성하기 (Generate)</button>
+      <button id="downloadBtn" class="btn btn-secondary" onclick="downloadFirstPage()" style="display:none;">📄 현재 페이지 다운로드</button>
+    </div>
+
+    <div class="preview" id="previewArea">
+      <div style="color: var(--text-muted); margin-top: 5rem; text-align: center;">
+        좌측에서 텍스트와 스타일을 입력하고 [손글씨 작성하기] 버튼을 누르세요.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentImages = [];
+    let extractedStyle = null;
+
+    function setText(name, txt) {
+      document.getElementById('textInput').value = txt;
+    }
+    function setPrompt(p) {
+      document.getElementById('promptInput').value = p;
+    }
+
+    async function handleStyleUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      document.getElementById('uploadLabel').innerText = '⏳ 필체 분석 중... (' + file.name + ')';
+      
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const resp = await fetch('/api/extract-style', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({image: reader.result})
+          });
+          const res = await resp.json();
+          if (res.style) {
+            extractedStyle = res.style;
+            document.getElementById('uploadLabel').innerText = `✅ 필체 적용됨 (기울기 ${res.style.slant_deg}°, 굵기 ${res.style.thickness_scale}x)`;
+          }
+        } catch (e) {
+          document.getElementById('uploadLabel').innerText = '❌ 필체 분석 실패: ' + e;
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function generate() {
+      const btn = document.getElementById('genBtn');
+      const status = document.getElementById('statusInfo');
+      const text = document.getElementById('textInput').value;
+      const prompt = document.getElementById('promptInput').value;
+      const generator = document.getElementById('genSelect').value;
+      const page = document.getElementById('pageSelect').value;
+
+      btn.disabled = true;
+      btn.innerText = '작성 중...';
+      status.innerText = '생성 중...';
+
+      try {
+        const payload = {
+          text: text,
+          prompt: prompt,
+          generator: generator,
+          page: page,
+          dpi: 150,
+          style: extractedStyle
+        };
+        const t0 = performance.now();
+        const resp = await fetch('/api/generate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+
+        if (data.error) {
+          alert('생성 에러: ' + data.error);
+          return;
+        }
+
+        currentImages = data.images || [];
+        const preview = document.getElementById('previewArea');
+        preview.innerHTML = '';
+
+        currentImages.forEach((b64, idx) => {
+          const card = document.createElement('div');
+          card.className = 'page-card';
+          card.innerHTML = `<img src="data:image/png;base64,${b64}" alt="Page ${idx + 1}">`;
+          preview.appendChild(card);
+        });
+
+        status.innerText = `완료: ${data.pages}페이지 생성됨 (${elapsed}초, 엔진: ${data.generator})`;
+        document.getElementById('downloadBtn').style.display = 'block';
+      } catch (err) {
+        status.innerText = '에러 발생: ' + err;
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '손글씨 작성하기 (Generate)';
+      }
+    }
+
+    function downloadFirstPage() {
+      if (!currentImages.length) return;
+      const a = document.createElement('a');
+      a.href = 'data:image/png;base64,' + currentImages[0];
+      a.download = 'vibefont_output.png';
+      a.click();
+    }
+  </script>
+</body>
+</html>

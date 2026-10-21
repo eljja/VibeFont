@@ -1,0 +1,1 @@
+"""VibeFont Web Studio package."""

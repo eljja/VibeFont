@@ -71,6 +71,21 @@ def cmd_validate_data(args) -> None:
         sys.exit(1)
 
 
+def cmd_serve(args) -> None:
+    from .web.server import create_server
+
+    server = create_server(args.host, args.port)
+    url = f"http://{args.host}:{args.port}"
+    print(f"VibeFont Studio running at {url}")
+    print("Press Ctrl+C to stop.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down VibeFont Studio.")
+    finally:
+        server.server_close()
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="vibefont", description="text + vibe prompt -> handwriting")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -97,6 +112,11 @@ def main(argv: list[str] | None = None) -> None:
     v = sub.add_parser("validate-data", help="validate dataset health and integrity")
     v.add_argument("path", help="path to processed dataset directory")
     v.set_defaults(func=cmd_validate_data)
+
+    s = sub.add_parser("serve", help="launch local interactive VibeFont Web Studio")
+    s.add_argument("--host", default="127.0.0.1", help="host address to bind (default: 127.0.0.1)")
+    s.add_argument("--port", type=int, default=8080, help="port to listen on (default: 8080)")
+    s.set_defaults(func=cmd_serve)
 
     args = ap.parse_args(argv)
     args.func(args)
