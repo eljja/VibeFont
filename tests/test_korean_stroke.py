@@ -118,3 +118,20 @@ def test_escaped_newline_handling_in_pipeline():
     pages = write_document("첫 번째 줄\\n두 번째 줄", spec, gen)
     assert len(pages[0].lines) == 2
 
+
+def test_complex_jungseong_full_height_and_jongseong_rhythm():
+    from vibefont.generate.hangul import syllable_strokes
+
+    # '과' (complex vowel ㅘ): the right vertical stem must reach near the top of the syllable (< -1.45)
+    gwa_strokes = syllable_strokes("과", rng=None, connectedness=0.0)
+    v_stem = gwa_strokes[-2]
+    assert v_stem[:, 1].min() < -1.45, f"Expected full-height right stem in '과', got min_y={v_stem[:, 1].min():.3f}"
+
+    # Syllable without jongseong ('가') should be vertically more compact than syllable with jongseong ('각')
+    ga_pts = np.concatenate(syllable_strokes("가", rng=None, connectedness=0.0), axis=0)
+    gak_pts = np.concatenate(syllable_strokes("각", rng=None, connectedness=0.0), axis=0)
+    ga_h = float(ga_pts[:, 1].max() - ga_pts[:, 1].min())
+    gak_h = float(gak_pts[:, 1].max() - gak_pts[:, 1].min())
+    assert gak_h > ga_h + 0.12, f"Expected jongseong syllable '각' ({gak_h:.2f}) taller than '가' ({ga_h:.2f})"
+
+

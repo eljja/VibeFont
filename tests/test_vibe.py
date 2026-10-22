@@ -22,3 +22,13 @@ def test_interpret_intensity_and_seed():
     spec = interpret("엄청 빠르게 날려 쓴 글씨, seed: 42")
     assert spec.seed == 42
     assert spec.style.speed > 0.8
+
+
+def test_interpret_natural_color_and_pen_phrases():
+    s_en = interpret("blue ballpoint on ruled notebook")
+    assert s_en.ink.color[2] > s_en.ink.color[0] + 0.25
+
+    s_ko = interpret("버건디 만년필로 미색 편지지에 정성스럽게")
+    assert s_ko.ink.color[0] > s_ko.ink.color[1] + 0.20
+    assert s_ko.paper.type == "ivory"
+

@@ -47,13 +47,14 @@ class _Font:
             out.append(np.stack([nx, ny], axis=1))
         return out
 
-    def word(
+    def _latin_word_strokes(
         self,
         word: str,
         rng: np.random.Generator | None = None,
         connectedness: float = 0.5,
     ) -> tuple[list[np.ndarray], float]:
-        if not any(is_hangul(c) for c in word):
+        """Character-by-character Latin synthesis with per-glyph jitter so repeated letters never match."""
+        if rng is None:
             strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(word)]
             strokes = [s for s in strokes if len(s)]
             if not strokes:
@@ -67,6 +68,72 @@ class _Font:
                 s[:, 0] -= min_x
             width = float(all_norm[:, 0].max() - min_x)
             return out, max(width, 0.1)
+
+        out_strokes: list[np.ndarray] = []
+        cursor_x = 0.0
+        for ch in word:
+            ch_raw = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(ch) if len(s)]
+            if not ch_raw:
+                cursor_x += 0.35
+                continue
+            all_c = np.concatenate(ch_raw)
+            cx0 = float(all_c[:, 0].min())
+            norm_c = self._norm_hershey(ch_raw, cx0)
+            all_n = np.concatenate(norm_c)
+            min_nx = float(all_n[:, 0].min())
+            max_nx = float(all_n[:, 0].max())
+            cw = max(max_nx - min_nx, 0.18)
+
+            # Per-character micro-variation (prevents identical double letters like 'll', 'ee', 'oo')
+            sx = float(np.exp(rng.normal(0.0, 0.045)))
+            sy = float(np.exp(rng.normal(0.0, 0.045)))
+            dy = float(rng.normal(0.0, 0.024))
+            d_slant = float(np.tan(np.radians(rng.normal(0.0, 1.6))))
+
+            ch_placed: list[np.ndarray] = []
+            for s in norm_c:
+                px = (s[:, 0] - min_nx) * sx
+                py = s[:, 1] * sy + dy
+                px = px - d_slant * py + cursor_x
+                ch_placed.append(np.stack([px, py], axis=1))
+
+            # Cursive soft-join between adjacent lowercase letters when connectedness is high
+            if (
+                out_strokes
+                and ch_placed
+                and connectedness >= 0.42
+                and rng.random() < (0.35 + 0.55 * connectedness)
+            ):
+                prev_end = out_strokes[-1][-1]
+                cur_start = ch_placed[0][0]
+                if float(np.linalg.norm(cur_start - prev_end)) < 0.65:
+                    mid = 0.5 * (prev_end + cur_start) + np.array([0.0, 0.04])
+                    t = np.linspace(0.0, 1.0, 5)[:, None]
+                    bridge = (1 - t) ** 2 * prev_end + 2 * (1 - t) * t * mid + t ** 2 * cur_start
+                    ch_placed[0] = np.concatenate([out_strokes.pop(), bridge[1:-1], ch_placed[0]], axis=0)
+
+            out_strokes.extend(ch_placed)
+            actual_max_x = max(float(s[:, 0].max()) for s in ch_placed)
+            kern_jitter = float(rng.normal(0.0, 0.02))
+            kern_base = 0.04 if connectedness >= 0.4 else (0.24 if cw < 0.25 else 0.21)
+            cursor_x = max(cursor_x + 0.22, actual_max_x + max(0.02, kern_base + kern_jitter))
+
+        if not out_strokes:
+            return [], 0.6 * len(word)
+        allp = np.concatenate(out_strokes)
+        min_x = float(allp[:, 0].min())
+        for s in out_strokes:
+            s[:, 0] -= min_x
+        return out_strokes, max(float(allp[:, 0].max() - min_x), 0.1)
+
+    def word(
+        self,
+        word: str,
+        rng: np.random.Generator | None = None,
+        connectedness: float = 0.5,
+    ) -> tuple[list[np.ndarray], float]:
+        if not any(is_hangul(c) for c in word):
+            return self._latin_word_strokes(word, rng=rng, connectedness=connectedness)
 
         # Mixed or pure Hangul
         runs: list[tuple[bool, str]] = []
@@ -86,7 +153,7 @@ class _Font:
 
         all_strokes: list[np.ndarray] = []
         cursor_x = 0.0
-        gap = 0.24
+        gap = 0.22
 
         for is_h, text in runs:
             if is_h:
@@ -96,25 +163,23 @@ class _Font:
                         ch_pts = np.concatenate(ch_strokes, axis=0)
                         ch_x0 = float(ch_pts[:, 0].min())
                         ch_w = float(ch_pts[:, 0].max() - ch_x0)
+                        sy_jit = float(np.exp(rng.normal(0.0, 0.032))) if rng is not None else 1.0
+                        sx_jit = float(np.exp(rng.normal(0.0, 0.032))) if rng is not None else 1.0
+                        dy_jit = float(rng.normal(0.0, 0.030)) if rng is not None else 0.0
                         for s in ch_strokes:
                             sp = s.copy()
-                            sp[:, 0] = (sp[:, 0] - ch_x0) + cursor_x
+                            sp[:, 0] = (sp[:, 0] - ch_x0) * sx_jit + cursor_x
+                            sp[:, 1] = sp[:, 1] * sy_jit + dy_jit
                             all_strokes.append(sp)
-                        cursor_x += max(ch_w, 1.35) + gap
+                        gap_jit = float(rng.normal(0.0, 0.025)) if rng is not None else 0.0
+                        cursor_x += max(ch_w * sx_jit, 1.28) + max(0.08, gap + gap_jit)
                     else:
                         cursor_x += 0.9
             else:
-                h_strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(text)]
-                h_strokes = [s for s in h_strokes if len(s)]
-                if h_strokes:
-                    allp = np.concatenate(h_strokes)
-                    x0 = allp[:, 0].min()
-                    norm_s = self._norm_hershey(h_strokes, x0)
-                    all_n = np.concatenate(norm_s)
-                    min_nx = float(all_n[:, 0].min())
-                    w = float(all_n[:, 0].max() - min_nx)
+                norm_s, w = self._latin_word_strokes(text, rng=rng, connectedness=connectedness)
+                if norm_s:
                     for s in norm_s:
-                        sp = np.stack([s[:, 0] - min_nx + cursor_x, s[:, 1]], axis=1)
+                        sp = np.stack([s[:, 0] + cursor_x, s[:, 1]], axis=1)
                         all_strokes.append(sp)
                     cursor_x += w + gap
                 else:
@@ -166,10 +231,18 @@ class ProceduralGenerator:
     name = "procedural"
 
     def __init__(self) -> None:
-        self.fonts = {"cursive": _Font("scripts"), "print": _Font("futural")}
+        self.fonts = {
+            "fancy": _Font("scripts"),
+            "cursive": _Font("cursive"),
+            "print": _Font("futural"),
+        }
 
     def _font(self, style: StyleSpec) -> _Font:
-        return self.fonts["cursive" if style.connectedness >= 0.4 else "print"]
+        if style.connectedness >= 0.65 and style.roundness >= 0.55:
+            return self.fonts["fancy"]
+        if style.connectedness >= 0.36:
+            return self.fonts["cursive"]
+        return self.fonts["print"]
 
     def estimate_width(self, text: str, style: StyleSpec) -> float:
         f = self._font(style)

@@ -86,3 +86,35 @@ def test_cli_write_with_save_spec(tmp_path: Path, run_cli):
     assert out_spec.exists()
     spec_data = json.loads(out_spec.read_text(encoding="utf-8"))
     assert "style" in spec_data
+
+
+def test_ruled_paper_does_not_skip_lines():
+    from vibefont.document.layout import line_pitch_mm
+    from vibefont.vibe.interpreter import interpret
+
+    spec = interpret("ruled notebook, blue ballpoint pen, hurried fast slanted lecture notes")
+    assert spec.paper.type == "ruled"
+    assert line_pitch_mm(spec) == pytest.approx(spec.paper.line_spacing_mm)
+
+
+def test_grid_paper_print_letters_does_not_trigger_formal_letter():
+    from vibefont.vibe.interpreter import interpret
+
+    spec = interpret("grid paper, gray pencil, small neat upright print letters, careful")
+    assert spec.paper.type == "grid"
+    assert "formal_letter" not in spec.matched
+
+
+def test_print_mode_kerning_separates_narrow_letters():
+    import numpy as np
+    from vibefont.generate.procedural import _Font
+
+    f = _Font("futural")
+    rng = np.random.default_rng(42)
+    strokes, _ = f.word("rn", rng=rng, connectedness=0.1)
+    assert len(strokes) >= 4
+    r_max_x = max(float(s[:, 0].max()) for s in strokes[:2])
+    n_min_x = min(float(s[:, 0].min()) for s in strokes[2:])
+    assert n_min_x - r_max_x >= 0.16
+
+

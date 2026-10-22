@@ -43,7 +43,7 @@ def write_document(text: str, spec: VibeSpec, gen: StrokeGenerator, rng: np.rand
     bases = baselines_mm(spec)
     est_lines = max(1, int(len(text) * spec.style.size_mm * 0.9 / usable) + text.count("\n"))
     drift = DocumentDrift(spec.style, rng, expected_lines=est_lines)
-    slant_w = 0.0 if getattr(gen, "name", "") == "procedural" else 0.7
+    slant_w = 0.0 if getattr(gen, "name", "") in ("procedural", "model") else 0.7
 
     pages = [Page(w_mm, h_mm)]
     line_idx = 0
@@ -63,14 +63,16 @@ def write_document(text: str, spec: VibeSpec, gen: StrokeGenerator, rng: np.rand
             n = 1
             while n < len(words) and x_units(" ".join(words[: n + 1]), st.size_scale) <= avail:
                 n += 1
-            for _attempt in range(4):
+            for _attempt in range(8):
                 line_text = " ".join(words[:n])
                 req = LineRequest(line_text, spec.style, st, rng, context[-CONTEXT_LINES:])
                 ink = gen.generate_line(req)
                 width_mm = (ink.bbox()[2] - ink.bbox()[0]) * spec.style.size_mm * st.size_scale
                 if width_mm <= avail * 1.02 or n == 1:
                     break
-                n -= 1
+                # Step down proportionally so even long lines converge in 1-2 tries without horizontal squishing
+                step_down = max(1, int(n - n * (avail / max(width_mm, 1e-3))))
+                n = max(1, n - step_down)
             if width_mm > avail and len(ink):
                 ink = ink.scale(avail / width_mm, 1.0)
             if line_idx >= len(bases):

@@ -62,15 +62,33 @@ def _curve(ctrl: list[list[float]] | np.ndarray, n: int = 12) -> np.ndarray:
     return np.concatenate(segments, axis=0)
 
 
-def _ellipse_strokes(cx: float, cy: float, rx: float, ry: float, n: int = 18) -> np.ndarray:
+def _ellipse_strokes(
+    cx: float,
+    cy: float,
+    rx: float,
+    ry: float,
+    n: int = 18,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     """Natural handwriting loop starting near 11 o'clock, sweeping CCW with slight overlap."""
-    th = np.linspace(-0.55 * np.pi, 1.52 * np.pi, n)
+    start_ang = -0.55 * np.pi
+    span_ang = 2.07 * np.pi
+    if rng is not None:
+        start_ang += float(rng.normal(0.0, 0.14))
+        span_ang += float(rng.normal(0.0, 0.12))
+        rx *= float(np.exp(rng.normal(0.0, 0.04)))
+        ry *= float(np.exp(rng.normal(0.0, 0.04)))
+    th = np.linspace(start_ang, start_ang + span_ang, n)
     x = cx + rx * np.cos(th) + 0.03 * rx * np.sin(2 * th)
     y = cy + ry * np.sin(th)
     return np.stack([x, y], axis=1)
 
 
-def choseong_strokes(idx: int) -> list[np.ndarray]:
+def choseong_strokes(
+    idx: int,
+    rng: np.random.Generator | None = None,
+    connectedness: float = 0.5,
+) -> list[np.ndarray]:
     """Returns list of smooth curved (M, 2) strokes in normalized [0, 1] x [0, 1] box."""
     if idx == 0:  # ㄱ: tilted horizontal -> rounded corner -> sweeping down-left stroke
         return [_curve([[0.06, 0.16], [0.55, 0.10], [0.90, 0.10], [0.86, 0.55], [0.72, 0.94]], 14)]
@@ -92,7 +110,17 @@ def choseong_strokes(idx: int) -> list[np.ndarray]:
             _curve([[0.54, 0.16], [0.94, 0.10]], 8),
             _curve([[0.56, 0.14], [0.54, 0.88], [0.95, 0.86]], 12),
         ]
-    elif idx == 5:  # ㄹ: fluid handwritten 2-stroke or S-ribbon
+    elif idx == 5:  # ㄹ: style-responsive allographs (3-stroke print, 2-stroke standard, 1-stroke ribbon)
+        if connectedness < 0.35:
+            return [
+                _curve([[0.08, 0.15], [0.88, 0.09], [0.85, 0.46]], 11),
+                _curve([[0.14, 0.49], [0.50, 0.47], [0.85, 0.45]], 9),
+                _curve([[0.14, 0.49], [0.12, 0.90], [0.55, 0.92], [0.94, 0.85]], 12),
+            ]
+        elif connectedness >= 0.68:
+            return [
+                _curve([[0.08, 0.15], [0.88, 0.09], [0.85, 0.45], [0.14, 0.49], [0.12, 0.90], [0.94, 0.85]], 20)
+            ]
         return [
             _curve([[0.08, 0.15], [0.88, 0.09], [0.85, 0.46], [0.14, 0.48]], 14),
             _curve([[0.14, 0.48], [0.12, 0.90], [0.55, 0.92], [0.94, 0.85]], 12),
@@ -117,9 +145,10 @@ def choseong_strokes(idx: int) -> list[np.ndarray]:
             _curve([[0.54, 0.50], [0.92, 0.47]], 8),
         ]
     elif idx == 9:  # ㅅ
+        by = 0.44 + (float(rng.normal(0.0, 0.03)) if rng is not None else 0.0)
         return [
             _curve([[0.52, 0.08], [0.36, 0.52], [0.08, 0.92]], 10),
-            _curve([[0.38, 0.44], [0.66, 0.68], [0.92, 0.90]], 10),
+            _curve([[0.38, by], [0.66, 0.68], [0.92, 0.90]], 10),
         ]
     elif idx == 10:  # ㅆ
         return [
@@ -129,7 +158,7 @@ def choseong_strokes(idx: int) -> list[np.ndarray]:
             _curve([[0.68, 0.45], [0.82, 0.68], [0.95, 0.90]], 9),
         ]
     elif idx == 11:  # ㅇ
-        return [_ellipse_strokes(0.50, 0.50, 0.39, 0.40, 18)]
+        return [_ellipse_strokes(0.50, 0.50, 0.39, 0.40, 18, rng=rng)]
     elif idx == 12:  # ㅈ
         return [
             _curve([[0.10, 0.16], [0.52, 0.10], [0.88, 0.10], [0.48, 0.52], [0.08, 0.92]], 14),
@@ -170,7 +199,7 @@ def choseong_strokes(idx: int) -> list[np.ndarray]:
         return [
             _curve([[0.36, 0.04], [0.50, 0.08], [0.64, 0.11]], 8),
             _curve([[0.08, 0.25], [0.50, 0.20], [0.92, 0.18]], 9),
-            _ellipse_strokes(0.50, 0.64, 0.34, 0.29, 16),
+            _ellipse_strokes(0.50, 0.64, 0.34, 0.29, 16, rng=rng),
         ]
     return []
 
@@ -216,26 +245,26 @@ def jungseong_strokes(idx: int) -> list[np.ndarray]:
         ]
     elif idx == 8:  # ㅗ
         return [_curve([[0.50, 0.06], [0.49, 0.30], [0.50, 0.52]], 8), h_main(0.52)]
-    elif idx == 9:  # ㅘ
+    elif idx == 9:  # ㅘ (left ㅗ sits below choseong in y=[0.54..0.78], right ㅏ spans full y=[0.02..0.98])
         return [
-            _curve([[0.32, 0.12], [0.31, 0.32], [0.32, 0.52]], 8),
-            _curve([[0.04, 0.55], [0.34, 0.51], [0.64, 0.47]], 9),
-            v_main(0.72),
-            _curve([[0.72, 0.48], [0.85, 0.46], [0.98, 0.44]], 8),
+            _curve([[0.28, 0.54], [0.27, 0.66], [0.28, 0.78]], 8),
+            _curve([[0.02, 0.80], [0.30, 0.76], [0.58, 0.72]], 9),
+            v_main(0.70),
+            _curve([[0.70, 0.48], [0.84, 0.46], [0.98, 0.44]], 8),
         ]
     elif idx == 10:  # ㅙ
         return [
-            _curve([[0.26, 0.12], [0.25, 0.32], [0.26, 0.52]], 8),
-            _curve([[0.04, 0.55], [0.30, 0.51], [0.56, 0.47]], 9),
-            v_main(0.64),
-            _curve([[0.64, 0.48], [0.77, 0.46], [0.90, 0.45]], 8),
-            v_main(0.92),
+            _curve([[0.24, 0.54], [0.23, 0.66], [0.24, 0.78]], 8),
+            _curve([[0.02, 0.80], [0.28, 0.76], [0.52, 0.72]], 9),
+            v_main(0.62),
+            _curve([[0.62, 0.48], [0.76, 0.46], [0.88, 0.45]], 8),
+            v_main(0.90),
         ]
     elif idx == 11:  # ㅚ
         return [
-            _curve([[0.34, 0.12], [0.33, 0.32], [0.34, 0.52]], 8),
-            _curve([[0.04, 0.55], [0.35, 0.51], [0.66, 0.47]], 9),
-            v_main(0.78),
+            _curve([[0.30, 0.54], [0.29, 0.66], [0.30, 0.78]], 8),
+            _curve([[0.02, 0.80], [0.32, 0.76], [0.62, 0.72]], 9),
+            v_main(0.76),
         ]
     elif idx == 12:  # ㅛ
         return [
@@ -245,26 +274,26 @@ def jungseong_strokes(idx: int) -> list[np.ndarray]:
         ]
     elif idx == 13:  # ㅜ
         return [h_main(0.46), _curve([[0.50, 0.46], [0.49, 0.72], [0.50, 0.96]], 9)]
-    elif idx == 14:  # ㅝ
+    elif idx == 14:  # ㅝ (left ㅜ sits below choseong in y=[0.56..0.92], right ㅓ spans full y=[0.02..0.98])
         return [
-            _curve([[0.04, 0.48], [0.34, 0.45], [0.64, 0.42]], 9),
-            _curve([[0.34, 0.46], [0.33, 0.70], [0.34, 0.94]], 8),
-            _curve([[0.52, 0.62], [0.66, 0.60], [0.78, 0.58]], 8),
-            v_main(0.80),
+            _curve([[0.02, 0.58], [0.32, 0.55], [0.60, 0.52]], 9),
+            _curve([[0.30, 0.56], [0.29, 0.74], [0.30, 0.92]], 8),
+            _curve([[0.48, 0.68], [0.62, 0.66], [0.76, 0.64]], 8),
+            v_main(0.78),
         ]
     elif idx == 15:  # ㅞ
         return [
-            _curve([[0.04, 0.48], [0.30, 0.45], [0.56, 0.42]], 9),
-            _curve([[0.28, 0.46], [0.27, 0.70], [0.28, 0.94]], 8),
-            _curve([[0.48, 0.62], [0.58, 0.60], [0.68, 0.58]], 8),
-            v_main(0.70),
-            v_main(0.92),
+            _curve([[0.02, 0.58], [0.28, 0.55], [0.54, 0.52]], 9),
+            _curve([[0.26, 0.56], [0.25, 0.74], [0.26, 0.92]], 8),
+            _curve([[0.44, 0.68], [0.55, 0.66], [0.66, 0.64]], 8),
+            v_main(0.68),
+            v_main(0.90),
         ]
     elif idx == 16:  # ㅟ
         return [
-            _curve([[0.04, 0.48], [0.34, 0.45], [0.66, 0.42]], 9),
-            _curve([[0.35, 0.46], [0.34, 0.70], [0.35, 0.94]], 8),
-            v_main(0.80),
+            _curve([[0.02, 0.58], [0.32, 0.55], [0.62, 0.52]], 9),
+            _curve([[0.32, 0.56], [0.31, 0.74], [0.32, 0.92]], 8),
+            v_main(0.78),
         ]
     elif idx == 17:  # ㅠ
         return [
@@ -274,8 +303,8 @@ def jungseong_strokes(idx: int) -> list[np.ndarray]:
         ]
     elif idx == 18:  # ㅡ
         return [h_main(0.50)]
-    elif idx == 19:  # ㅢ
-        return [_curve([[0.04, 0.52], [0.36, 0.49], [0.68, 0.46]], 9), v_main(0.80)]
+    elif idx == 19:  # ㅢ (left ㅡ sits below choseong at y=0.68, right ㅣ spans full y=[0.02..0.98])
+        return [_curve([[0.02, 0.68], [0.34, 0.65], [0.66, 0.62]], 9), v_main(0.78)]
     elif idx == 20:  # ㅣ
         return [v_main(0.50)]
     return []
@@ -302,16 +331,20 @@ COMPOSITE_JONGSEONG = {
 }
 
 
-def jongseong_strokes(idx: int) -> list[np.ndarray]:
+def jongseong_strokes(
+    idx: int,
+    rng: np.random.Generator | None = None,
+    connectedness: float = 0.5,
+) -> list[np.ndarray]:
     if idx == 0:
         return []
     base_idx = JONGSEONG_MAP[idx]
     if base_idx is not None:
-        return choseong_strokes(base_idx)
+        return choseong_strokes(base_idx, rng=rng, connectedness=connectedness)
     if idx in COMPOSITE_JONGSEONG:
         left_c, right_c = COMPOSITE_JONGSEONG[idx]
-        s_left = _transform_strokes(choseong_strokes(left_c), 0.0, 0.0, 0.47, 1.0)
-        s_right = _transform_strokes(choseong_strokes(right_c), 0.53, 0.0, 0.47, 1.0)
+        s_left = _transform_strokes(choseong_strokes(left_c, rng=rng, connectedness=connectedness), 0.0, 0.0, 0.47, 1.0)
+        s_right = _transform_strokes(choseong_strokes(right_c, rng=rng, connectedness=connectedness), 0.53, 0.0, 0.47, 1.0)
         return s_left + s_right
     return []
 
@@ -390,14 +423,19 @@ def syllable_strokes(
     f_idx = s_idx % 28
 
     has_jong = f_idx > 0
-    c_st = choseong_strokes(c_idx)
+    c_st = choseong_strokes(c_idx, rng=rng, connectedness=connectedness)
     j_st = jungseong_strokes(j_idx)
-    f_st = jongseong_strokes(f_idx)
+    f_st = jongseong_strokes(f_idx, rng=rng, connectedness=connectedness)
 
-    # Full syllable target frame: width W=1.62, top Y_TOP=-1.92, bottom Y_BOT=+0.18 (height 2.10)
-    W = 1.62
-    Y_TOP = -1.92
-    H = 2.10
+    # Syllables without jongseong are slightly more compact vertically than 3-tier syllables with jongseong
+    if has_jong:
+        W = 1.60
+        Y_TOP = -1.88
+        H = 2.08
+    else:
+        W = 1.50
+        Y_TOP = -1.78
+        H = 1.82
 
     strokes: list[np.ndarray] = []
 
@@ -420,13 +458,14 @@ def syllable_strokes(
             strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.65 * H, 0.68 * W, 0.33 * H, rng)
 
     else:
+        # Complex vowel (ㅘ, ㅙ, ㅚ, ㅝ, ㅞ, ㅟ, ㅢ): j_st spans from top (Y_TOP + 0.02*H) so right vertical stem is full-height!
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.08 * W, Y_TOP + 0.05 * H, 0.44 * W, 0.46 * H, rng)
-            strokes += _transform_strokes(j_st, 0.05 * W, Y_TOP + 0.46 * H, 0.90 * W, 0.50 * H, rng)
+            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.05 * H, 0.44 * W, 0.42 * H, rng)
+            strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.94 * H, rng)
         else:
-            strokes += _transform_strokes(c_st, 0.08 * W, Y_TOP + 0.03 * H, 0.44 * W, 0.38 * H, rng)
-            strokes += _transform_strokes(j_st, 0.05 * W, Y_TOP + 0.38 * H, 0.90 * W, 0.30 * H, rng)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.67 * H, 0.68 * W, 0.31 * H, rng)
+            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.03 * H, 0.44 * W, 0.30 * H, rng)
+            strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.58 * H, rng)
+            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.63 * H, 0.68 * W, 0.35 * H, rng)
 
     return _soft_connect(strokes, connectedness, rng)
 

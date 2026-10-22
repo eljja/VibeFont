@@ -32,11 +32,11 @@ def rule_positions(spec: VibeSpec) -> np.ndarray:
 
 
 def line_pitch_mm(spec: VibeSpec) -> float:
-    need = max(spec.layout.line_height_mm, spec.style.size_mm * 3.6)
     if spec.paper.type in ("ruled", "grid"):
         sp = spec.paper.line_spacing_mm
-        return sp * max(1, math.ceil(need / sp - 0.15))
-    return need
+        need_ruled = max(spec.layout.line_height_mm, spec.style.size_mm * 2.45)
+        return sp * max(1, math.ceil(need_ruled / sp - 0.15))
+    return max(spec.layout.line_height_mm, spec.style.size_mm * 3.2)
 
 
 def baselines_mm(spec: VibeSpec) -> np.ndarray:

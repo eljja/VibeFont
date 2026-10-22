@@ -47,7 +47,12 @@ def interpret(prompt: str, base: VibeSpec | None = None) -> VibeSpec:
             if f > 0:
                 spec.update(rule.set)
         for keys, rgb in COLORS.items():
-            if any(k in clause for k in keys) and any(w in clause for w in ("잉크", "펜", "색", "ink", "pen", "colou")):
+            if any(k in clause for k in keys):
+                # Avoid mistaking "brown paper" for brown ink unless ink/pen/sepia is also mentioned
+                if "brown" in keys and "brown paper" in clause and not any(
+                    w in clause for w in ("ink", "pen", "sepia", "fountain", "ballpoint", "gel", "marker", "brush")
+                ):
+                    continue
                 spec.ink.color = rgb
                 spec.matched.append(f"color:{keys[-1]}")
     m = re.search(r"seed\s*[:=]?\s*(\d+)", text)

@@ -157,10 +157,14 @@ class ModelGenerator:
             b_xy = pts[sl, :2]
             if len(b_xy) < 2:
                 continue
-            # Anchor stroke start to structural start + small neural jitter, evolve with neural shape
+            # Brownian-bridge endpoint-pinned neural residual: preserves closed loops (ㅇ, o, a, e)
+            # while injecting the trained CoreModel's stroke curvature and rhythm in the interior
             rel_mod = m_xy - m_xy[0:1]
             rel_base = b_xy - b_xy[0:1]
-            blended_rel = 0.65 * rel_base + 0.35 * rel_mod
+            t_lin = np.linspace(0.0, 1.0, len(rel_mod), dtype=np.float32)[:, None]
+            drift_corr = t_lin * (rel_mod[-1:] - rel_base[-1:])
+            rel_mod_pinned = rel_mod - 0.80 * drift_corr
+            blended_rel = 0.60 * rel_base + 0.40 * rel_mod_pinned
             if len(blended_rel) >= 3:
                 blended_rel[1:-1] = (
                     0.2 * blended_rel[:-2] + 0.6 * blended_rel[1:-1] + 0.2 * blended_rel[2:]
