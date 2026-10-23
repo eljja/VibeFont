@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from vibefont.document.pipeline import write_document
 from vibefont.generate import get_generator
+from vibefont.generate.calligraphy import compose_calligraphy_page
 from vibefont.render.raster import render_page, save_images
 from vibefont.vibe.interpreter import interpret
 
@@ -43,7 +44,7 @@ MASTER_CURSIVE_KO = [
         "id": "ko_master_02",
         "category": "master_cursive",
         "title": "오래된 바이올린 현의 기억 (Memories of an Old Violin)",
-        "vibe": "미색 편지지에 버건디 와인색 만년필로 달필처럼 매우 우아하고 유려한 필기체로 천천히 쓴 편지",
+        "vibe": "미색 편지지에 버건디 와인색 붓으로 달필처럼 매우 우아하고 유려한 필기체로 천천히 쓴 편지",
         "seed": 302,
         "text": (
             "장인의 손끝에서 깎여 나온 단풍나무 울림통 속에는 백 년 전 어느 겨울밤에 연주되었던 야상곡의 잔향이 아직도 "
@@ -56,7 +57,7 @@ MASTER_CURSIVE_KO = [
         "id": "ko_master_03",
         "category": "master_cursive",
         "title": "안개 낀 수목원의 아침 편지 (Misty Arboretum Morning)",
-        "vibe": "줄노트 위에 숲색 초록 만년필로 명필의 멋진 필기체로 단정하고 우아하게 이어 쓴 기록",
+        "vibe": "줄노트 위에 숲색 초록 볼펜으로 명필의 멋진 필기체로 단정하고 우아하게 이어 쓴 기록",
         "seed": 303,
         "text": (
             "새벽 안개가 전나무 숲길을 하얗게 감싸 안은 아침, 축축한 이끼 위로 떨어진 솔방울에서 맑고 서늘한 풀내음이 "
@@ -82,7 +83,7 @@ MASTER_CURSIVE_KO = [
         "id": "ko_master_05",
         "category": "master_cursive",
         "title": "겨울 바다 등대지기의 서신 (The Lighthouse Keeper's Letter)",
-        "vibe": "크라프트 종이에 먹색 만년필로 달필의 멋진 필기체로 힘있고 우아하게 이어 쓴 편지",
+        "vibe": "크라프트 종이에 연필로 달필의 멋진 필기체로 힘있고 우아하게 이어 쓴 편지",
         "seed": 305,
         "text": (
             "검푸른 수평선 너머로 거센 눈보라가 몰아치는 밤에도 등대의 불빛만은 흔들림 없이 머나먼 항로를 비추고 있습니다.\n"
@@ -110,7 +111,7 @@ MASTER_CURSIVE_EN = [
         "id": "en_master_02",
         "category": "master_cursive",
         "title": "Autumn Twilight in the Bodleian Library",
-        "vibe": "cream paper, sepia brown fountain pen, copperplate masterful elegant cursive, careful",
+        "vibe": "cream paper, sepia brown brush, copperplate masterful elegant cursive, careful",
         "seed": 402,
         "text": (
             "As October twilight deepens outside the tall leaded windows, the scent of cedarwood shelves and "
@@ -123,7 +124,7 @@ MASTER_CURSIVE_EN = [
         "id": "en_master_03",
         "category": "master_cursive",
         "title": "Celestial Navigator's Starlight Log",
-        "vibe": "ruled notebook, navy blue-black fountain pen, virtuoso masterful cursive, graceful neat",
+        "vibe": "ruled notebook, navy blue ballpoint pen, virtuoso masterful cursive, graceful neat",
         "seed": 403,
         "text": (
             "Two hours past midnight under a cloudless Atlantic sky: Orion rises clear above the starboard bow "
@@ -149,7 +150,7 @@ MASTER_CURSIVE_EN = [
         "id": "en_master_05",
         "category": "master_cursive",
         "title": "Reflections by the Villa d'Este Fountains",
-        "vibe": "kraft paper, charcoal sumi fountain pen, virtuoso copperplate graceful cursive, careful",
+        "vibe": "kraft paper, pencil, virtuoso copperplate graceful cursive, careful",
         "seed": 405,
         "text": (
             "Along the cypress-lined terraces of Tivoli, a hundred ancient fountains murmur in eternal counterpoint "
@@ -806,42 +807,49 @@ def main() -> None:
     out_dir = Path("outputs/showcase")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load previous 20 entries and include their original text from generate_showcase_20
+    # Load and re-render previous 20 entries with the upgraded physical pen & paper shader
     from generate_showcase_20 import ENGLISH_SHOWCASE, KOREAN_SHOWCASE
 
-    prev_map = {item["id"]: item for item in (KOREAN_SHOWCASE + ENGLISH_SHOWCASE)}
     manifest_path = out_dir / "manifest.json"
-    existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else []
-    original_entries = []
-    for e in existing_manifest:
-        if e["id"] in prev_map:
-            e["category"] = "original"
-            e["text"] = prev_map[e["id"]]["text"]
-            original_entries.append(e)
-
     gen = get_generator("model", "checkpoints/bilingual_5k_core")
-    new_items = MASTER_CURSIVE_KO + MASTER_CURSIVE_EN + KID_SCRAWL_KO + KID_SCRAWL_EN + CALLIGRAPHY_KO + CALLIGRAPHY_EN
+    orig_items = []
+    for item in KOREAN_SHOWCASE + ENGLISH_SHOWCASE:
+        it = dict(item)
+        it["category"] = "original"
+        orig_items.append(it)
 
-    print(f"Generating {len(new_items)} new showcase images using generator='{gen.name}'...", flush=True)
+    new_items = MASTER_CURSIVE_KO + MASTER_CURSIVE_EN + KID_SCRAWL_KO + KID_SCRAWL_EN + CALLIGRAPHY_KO + CALLIGRAPHY_EN
+    all_items = orig_items + new_items
+
+    print(f"Generating all {len(all_items)} showcase images using generator='{gen.name}'...", flush=True)
     t0 = time.perf_counter()
+    original_entries = []
     new_entries = []
 
-    for i, item in enumerate(new_items, 1):
+    for i, item in enumerate(all_items, 1):
         char_len = len(item["text"].replace("\n", ""))
         cat = item["category"]
-        if cat in ("master_cursive", "kid_scrawl"):
+        if cat in ("original", "master_cursive", "kid_scrawl"):
             assert char_len >= 100, f"{item['id']} has only {char_len} chars (< 100)!"
 
         spec = interpret(item["vibe"])
         spec.seed = item["seed"]
 
-        if cat == "master_cursive":
+        if cat == "original":
+            spec.layout.page = "B5"
+            spec.layout.margin_mm = (18.0, 15.0, 18.0, 15.0)
+            if spec.style.size_mm > 3.8:
+                spec.style.size_mm = 3.8
+        elif cat == "master_cursive":
             spec.layout.page = "B5"
             spec.layout.margin_mm = (18.0, 15.0, 18.0, 15.0)
             spec.style.neatness = max(spec.style.neatness, 0.90)
             spec.style.connectedness = max(spec.style.connectedness, 0.86)
             spec.style.consistency = max(spec.style.consistency, 0.90)
             spec.style.baseline_wobble = min(spec.style.baseline_wobble, 0.06)
+            if spec.pen.type == "brush":
+                spec.pen.width_mm = 0.68
+                spec.style.size_mm = 3.5
         elif cat == "kid_scrawl":
             spec.layout.page = "B5"
             spec.layout.margin_mm = (18.0, 15.0, 18.0, 15.0)
@@ -855,23 +863,22 @@ def main() -> None:
                 spec.paper.line_spacing_mm = 7.5
         elif cat == "calligraphy":
             spec.layout.page = "Card"
-            spec.layout.margin_mm = (12.0, 10.0, 12.0, 10.0)
-            spec.layout.align = "center"
-            spec.layout.v_align = "center"
-            spec.style.size_mm = 4.4 if item["id"].startswith("ko_") else 3.35
-            spec.style.connectedness = max(spec.style.connectedness, 0.76)
-            spec.style.neatness = max(spec.style.neatness, 0.84)
+            spec.pen.width_mm = 0.84 if spec.pen.type == "brush" else 0.88
 
         rng = np.random.default_rng(spec.seed)
-        pages = write_document(item["text"], spec, gen, rng)
-        assert len(pages) == 1, f"{item['id']} overflowed onto {len(pages)} pages!"
-        img = render_page(pages[0], spec, dpi=200, rng=np.random.default_rng(spec.seed + 1000))
+        if cat == "calligraphy":
+            page0 = compose_calligraphy_page(item["text"], spec, rng=rng)
+        else:
+            pages = write_document(item["text"], spec, gen, rng)
+            assert len(pages) == 1, f"{item['id']} overflowed onto {len(pages)} pages!"
+            page0 = pages[0]
+        img = render_page(page0, spec, dpi=200, rng=np.random.default_rng(spec.seed + 1000))
 
         out_path = out_dir / f"{item['id']}.png"
         save_images([img], out_path, dpi=200)
 
         entry = {
-            "index": len(original_entries) + i,
+            "index": i,
             "id": item["id"],
             "category": cat,
             "title": item["title"],
@@ -885,9 +892,12 @@ def main() -> None:
             "ink_rgb": [round(float(c), 3) for c in spec.ink.color],
             "file": str(out_path.resolve()),
         }
-        new_entries.append(entry)
+        if cat == "original":
+            original_entries.append(entry)
+        else:
+            new_entries.append(entry)
         print(
-            f"[{i:02d}/40] {out_path.name} ({char_len} chars, {cat}) | pen={spec.pen.type} paper={spec.paper.type}",
+            f"[{i:02d}/60] {out_path.name} ({char_len} chars, {cat}) | pen={spec.pen.type} paper={spec.paper.type}",
             flush=True,
         )
 

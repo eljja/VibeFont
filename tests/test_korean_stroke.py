@@ -188,6 +188,49 @@ def test_brush_vs_broad_nib_calligraphy_lexicon():
     assert spec_broad.pen.type == "broad_nib"
 
 
+def test_physical_pen_dynamics_and_contrast():
+    from vibefont.document.pipeline import write_document
+    from vibefont.render.pens import pen_samples
+    from vibefont.vibe.spec import VibeSpec
+
+    gen = ProceduralGenerator()
+    spec = VibeSpec()
+    spec.pen.type = "brush"
+    spec.pen.width_mm = 1.2
+    pages = write_document("아름다운 붓글씨", spec, gen, rng=np.random.default_rng(11))
+    ink = pages[0].lines[0]
+    ps = pen_samples(ink, spec.pen, spec.style, np.random.default_rng(11))
+    # Brush must exhibit dramatic dynamic width contrast (thick press vs sharp tapered tip)
+    width_ratio = float(ps.width_mm.max() / max(ps.width_mm.min(), 1e-4))
+    assert width_ratio >= 5.5, f"Expected brush width contrast >= 5.5x, got {width_ratio:.2f}x"
+
+
+def test_calligraphy_art_composition():
+    from vibefont.generate.calligraphy import compose_calligraphy_page
+    from vibefont.vibe.interpreter import interpret
+
+    spec_ko = interpret("아이보리 종이에 먹색 붓으로 힘차고 우아하게 쓴 캘리그라피")
+    spec_ko.seed = 701
+    page_ko = compose_calligraphy_page(
+        "눈보라 속에서도\n매화는 자신의 향기를\n팔지 않는다",
+        spec_ko,
+        rng=np.random.default_rng(701),
+    )
+    assert len(page_ko.lines) >= 3
+    # Should include decorative calligraphic seal or flourish metadata
+    assert page_ko.seal_box_mm is not None
+
+    spec_en = interpret("ivory paper, burgundy broad nib calligraphy pen, elegant masterful cursive")
+    spec_en.seed = 802
+    page_en = compose_calligraphy_page(
+        "Every shadow upon the earth\nis born only because\nthe light endures.",
+        spec_en,
+        rng=np.random.default_rng(802),
+    )
+    assert len(page_en.lines) >= 3
+
+
+
 
 
 

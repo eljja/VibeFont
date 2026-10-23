@@ -132,26 +132,46 @@ def normalize_line(ink: Ink, geom: LineGeometry | None = None) -> tuple[Ink, Lin
     return out, geom
 
 
-def pseudo_pressure(ink: Ink, a: float = 1.5, b: float = 0.12) -> np.ndarray:
-    """Pressure proxy from speed when the device recorded none: slow -> heavy.
+def pseudo_pressure(ink: Ink, a: float = 1.35, b: float = 0.22) -> np.ndarray:
+    """Biomechanical pressure proxy from velocity and stroke direction.
 
-    Expects normalised units (x-height / s). Returns values in (0, 1).
+    Models real human hand mechanics:
+      1. Downstrokes (dy > 0) press into the paper; upstrokes (dy < 0) lift off.
+      2. Entry attack (기필) peaks shortly after touchdown; exit release (수필/삐침)
+         tapers smoothly to a sharp point as the pen lifts off the page.
+      3. Slower movement at turns/curves increases pressure; fast sweeps lighten it.
     """
     p = np.full(len(ink), 0.5, np.float32)
     for sl in ink.stroke_slices():
         s = ink.points[sl]
-        if len(s) < 2:
+        n = len(s)
+        if n < 2:
+            p[sl] = 0.45
             continue
-        d = np.linalg.norm(np.diff(s[:, :2], axis=0), axis=1)
+        dxy = np.diff(s[:, :2], axis=0)
+        d = np.linalg.norm(dxy, axis=1)
         dt = np.maximum(np.diff(s[:, T]), 1e-3)
         v = np.concatenate([[d[0] / dt[0]], d / dt])
+        dy_unit = np.concatenate([[dxy[0, 1] / max(d[0], 1e-5)], dxy[:, 1] / np.maximum(d, 1e-5)])
+        dx_unit = np.concatenate([[dxy[0, 0] / max(d[0], 1e-5)], dxy[:, 0] / np.maximum(d, 1e-5)])
         k = min(5, len(v))
         v = np.convolve(v, np.ones(k) / k, mode="same")
-        pp = 1.0 / (1.0 + np.exp(-(a - b * v)))
-        # pen lands/leaves lightly
-        n = len(pp)
-        ramp = np.minimum(1.0, np.minimum(np.arange(n) + 1, n - np.arange(n)) / 4.0)
-        p[sl] = (0.25 + 0.75 * ramp) * pp
+        dy_smooth = np.convolve(dy_unit, np.ones(k) / k, mode="same")
+        dx_smooth = np.convolve(dx_unit, np.ones(k) / k, mode="same")
+
+        speed_term = 1.0 / (1.0 + np.exp(-(a - b * v)))
+        # Downward strokes press harder; upward strokes and fast rightward flicks lift slightly
+        dir_factor = np.clip(0.74 + 0.28 * dy_smooth - 0.08 * dx_smooth, 0.42, 1.12)
+
+        u = np.linspace(0.0, 1.0, n)
+        # Entry attack (기필): touch down -> slight press swell near u=0.14 -> steady
+        entry = np.clip(0.45 + 0.55 * (u / 0.12), 0.45, 1.0) + 0.14 * np.exp(-((u - 0.14) / 0.09) ** 2)
+        # Exit taper (수필): sharp release over the final 22% of the stroke
+        taper_len = 0.22 if n >= 8 else 0.16
+        exit_taper = np.clip((1.0 - u) / max(taper_len, 1e-3), 0.05, 1.0) ** 0.90
+
+        stroke_p = np.clip(speed_term * dir_factor * entry * exit_taper, 0.05, 1.0)
+        p[sl] = stroke_p.astype(np.float32)
     return p
 
 

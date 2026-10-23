@@ -25,6 +25,8 @@ class Page:
     width_mm: float
     height_mm: float
     lines: list[Ink] = field(default_factory=list)  # in page millimetres
+    seal_box_mm: tuple[float, float, float, float] | None = None
+    wash_accents: list[dict] = field(default_factory=list)
 
 
 def page_size(spec: VibeSpec) -> tuple[float, float]:

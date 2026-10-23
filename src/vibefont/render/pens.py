@@ -24,6 +24,10 @@ class PenSample:
     dens: np.ndarray  # (N,)
     grain: float  # 0..1: how much the paper tooth modulates deposition (pencil ~1)
     feather: float  # 0..1: lateral ink spread into paper fibres (fountain)
+    rim_halo: float = 0.0  # 0..1: capillary edge-ring darkening when liquid ink dries
+    dry_streak: float = 0.0  # 0..1: transverse bristle striations (brush) or ballpoint tracks
+    porous_threshold: float = 0.0  # 0..1: paper valley threshold where dry media (pencil) skips
+    dryness: np.ndarray | None = None  # (N,) per-point dry-brush / skip intensity in [0, 1]
 
 
 def _speed_mm_s(ink: Ink) -> np.ndarray:
@@ -74,60 +78,131 @@ def _stroke_ends(ink: Ink, mm: float) -> tuple[np.ndarray, np.ndarray]:
     return start, end
 
 
+def _curvature_and_downbias(ink: Ink) -> tuple[np.ndarray, np.ndarray]:
+    """Returns (curvature in 1/mm, downward movement bias in [-1, 1])."""
+    curv = np.zeros(len(ink))
+    down = np.zeros(len(ink))
+    for sl in ink.stroke_slices():
+        s = ink.points[sl].astype(np.float64)
+        if len(s) < 2:
+            continue
+        dxy = np.gradient(s[:, :2], axis=0)
+        ds = np.maximum(np.linalg.norm(dxy, axis=1), 1e-4)
+        down[sl] = np.clip(dxy[:, 1] / ds, -1.0, 1.0)
+        if len(s) >= 3:
+            ang = np.arctan2(dxy[:, 1], dxy[:, 0])
+            dang = np.abs((np.gradient(ang) + np.pi) % (2 * np.pi) - np.pi)
+            curv[sl] = np.clip(dang / ds, 0.0, 20.0)
+    return curv, down
+
+
 def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generator) -> PenSample:
     n = len(ink)
     p = ink.points[:, P].astype(np.float64) if ink.has_pressure else pseudo_pressure(ink).astype(np.float64)
     p = np.clip(np.nan_to_num(p, nan=0.5), 0.0, 1.0)
     v = _speed_mm_s(ink)
+    curv, down = _curvature_and_downbias(ink)
     W = pen.width_mm
-    start, end = _stroke_ends(ink, 0.5)
+    start, end = _stroke_ends(ink, 0.75)
     grain, feather = 0.15, 0.0
+    rim_halo, dry_streak, porous_threshold = 0.0, 0.0, 0.0
+    dryness = np.zeros(n, dtype=np.float64)
 
     if pen.type == "ballpoint":
-        w = W * (0.85 + 0.3 * p)
-        dens = 0.70 + 0.40 * p
-        skip_amt = np.clip((v - 60.0) / 220.0, 0.0, 0.7)
-        nz = _arc_noise(ink, rng, 0.7)
-        dens *= 1.0 - skip_amt * np.clip((nz - 0.45) * 2.2, 0, 1)
-        gate = np.zeros(n)
-        for sl in ink.stroke_slices():  # ink blob at the start of ~1 in 4 strokes
-            gate[sl] = float(rng.random() < 0.25)
-        dens *= 1.0 + 0.6 * start * gate
+        # Crisp oil-paste ballpoint: thin on upstrokes/flicks, fuller on downstrokes
+        taper = np.clip(1.0 - 0.52 * end, 0.30, 1.0)
+        w = W * (0.48 + 0.50 * p + 0.12 * np.maximum(down, 0)) * taper
+        # Paste ink transfers strongly when pulling down, skims lightly when pushing up
+        dens = (0.58 + 0.72 * p) * (0.78 + 0.28 * down)
+        skip_amt = np.clip((v - 38.0) / 145.0, 0.0, 0.75)
+        nz = _arc_noise(ink, rng, 0.55)
+        dryness = np.clip(skip_amt * np.clip((nz - 0.35) * 2.0, 0, 1) + 0.25 * np.maximum(-down, 0), 0.0, 0.78)
+        dens *= 1.0 - 0.52 * dryness
+        # Occasional dry start before ball catches traction + dark ink blob at sharp turns
+        start_gate = np.zeros(n)
+        for sl in ink.stroke_slices():
+            start_gate[sl] = -0.38 if rng.random() < 0.30 else (0.70 if rng.random() < 0.25 else 0.0)
+        corner_blob = np.clip((curv - 2.2) / 5.0, 0.0, 1.0) * (0.5 + 0.5 * nz)
+        dens = np.clip(dens * (1.0 + start * start_gate) + 0.90 * corner_blob, 0.24, 2.4)
+        w *= 1.0 + 0.22 * corner_blob
+        grain = 0.36
+        dry_streak = 0.42
     elif pen.type == "gel":
-        w = W * (0.95 + 0.1 * p)
-        dens = np.full(n, 1.15)
-        dens *= 1.0 + 0.3 * start
+        taper = np.clip(1.0 + 0.12 * start - 0.48 * end, 0.32, 1.12)
+        w = W * (0.72 + 0.36 * p) * taper
+        dens = (0.88 + 0.38 * p) * (1.0 + 0.38 * end + 0.18 * start)
+        rim_halo = 0.22
+        grain = 0.12
     elif pen.type == "fountain":
         th = _direction(ink)
-        nib_mod = 0.84 + 0.30 * np.abs(np.sin(th - np.radians(38.0)))
-        taper = np.clip(1.0 + 0.12 * start - 0.32 * end, 0.55, 1.12)
-        w = W * (0.68 + 0.56 * p) * nib_mod * taper
-        v0 = 35.0
-        dens = 0.55 + 0.85 * v0 / (v + v0)  # slow -> pooling
-        dens *= 1.0 + 0.45 * end + 0.2 * start
-        feather = 0.6
-        grain = 0.05
+        # Chisel + flex nib: thin cross-strokes/upstrokes, rich shaded downstrokes
+        nib_mod = 0.62 + 0.52 * np.abs(np.sin(th - np.radians(38.0)))
+        flex_mod = 0.52 + 0.78 * np.power(p, 1.15) + 0.18 * np.maximum(down, 0)
+        taper = np.clip(1.0 + 0.14 * start - 0.52 * end, 0.32, 1.15)
+        w = W * flex_mod * nib_mod * taper
+        # Liquid dye ink shading: translucent in fast mid-strokes, deep dark pooling at slow turns & stroke ends
+        v0 = 26.0
+        flow = v0 / (v + v0)
+        dens = (0.38 + 1.12 * flow) * (0.82 + 0.32 * p)
+        dens *= 1.0 + 0.78 * end + 0.28 * start + 0.25 * np.clip(curv / 4.0, 0, 1)
+        feather = 0.65
+        grain = 0.18
+        rim_halo = 0.62
     elif pen.type == "pencil":
-        w = W * (0.9 + 0.35 * p)
-        dens = 0.25 + 0.60 * p
+        # Graphite lead: directional pressure shading + porous paper tooth valleys
+        taper = np.clip(1.0 - 0.36 * end, 0.45, 1.05)
+        w = W * (0.64 + 0.50 * p + 0.10 * np.maximum(down, 0)) * taper
+        dens = (0.38 + 0.92 * np.power(p, 1.12)) * (0.80 + 0.28 * down)
+        nz = _arc_noise(ink, rng, 0.9)
+        dens *= 0.84 + 0.34 * nz
         grain = 1.0
+        porous_threshold = 0.40
+        dryness = np.clip(0.58 - 0.45 * p, 0.08, 0.58)
     elif pen.type == "marker":
-        w = W * (0.9 + 0.15 * p)
-        dens = np.full(n, 0.6)
-        dens *= 1.0 + 0.25 * end
-        grain = 0.05
-        feather = 0.3
+        chisel = 0.78 + 0.32 * np.abs(np.sin(_direction(ink) - np.radians(25.0)))
+        taper = np.clip(1.0 - 0.25 * end, 0.55, 1.05)
+        w = W * (0.82 + 0.24 * p) * chisel * taper
+        v0 = 45.0
+        dens = (0.48 + 0.42 * (v0 / (v + v0))) * (1.0 + 0.42 * end + 0.20 * start)
+        grain = 0.22
+        feather = 0.38
+        rim_halo = 0.28
     elif pen.type == "brush":
-        taper = np.clip(1.0 + 0.28 * start - 0.65 * end, 0.16, 1.25)
-        w = W * (0.14 + 0.98 * np.power(p, 1.25)) * taper
-        dens = 1.25 * (1.0 - 0.48 * np.clip((v - 120.0) / 300.0, 0, 1))
-        grain = 0.55
+        # Oriental brush / modern brush pen: 기필 (entry press), 송필 (belly), 수필 (needle-sharp exit flick)
+        th = _direction(ink)
+        dir_belly = 0.76 + 0.36 * np.abs(np.sin(th - np.radians(42.0))) + 0.18 * np.maximum(down, 0)
+        taper = np.clip(1.0 + 0.34 * start - 0.84 * end, 0.10, 1.32)
+        w = W * (0.18 + 1.02 * np.power(p, 1.22)) * dir_belly * taper
+        # Bristle ink depletion & high-speed dry-brush (갈필 / 비백)
+        nz = _arc_noise(ink, rng, 1.1)
+        speed_dry = np.clip((v - 58.0) / 160.0, 0.0, 0.80)
+        tail_dry = np.clip(end * 1.15 - 0.18, 0.0, 0.85) * (1.0 - 0.5 * p)
+        dryness = np.clip((0.50 * speed_dry + 0.60 * tail_dry) * (0.45 + 0.75 * nz), 0.0, 0.88)
+        dens = (0.88 + 0.62 * p) * (1.0 - 0.38 * dryness) * (1.0 + 0.32 * start)
+        grain = 0.62
+        feather = 0.20
+        dry_streak = 0.76
+        rim_halo = 0.22
     elif pen.type == "broad_nib":
         th = _direction(ink)
-        w = W * np.abs(np.sin(th - np.radians(pen.nib_angle_deg))) + 0.12 * W
-        dens = np.full(n, 1.1) * (1.0 + 0.3 * end)
-        feather = 0.2
+        chisel = np.abs(np.sin(th - np.radians(pen.nib_angle_deg)))
+        taper = np.clip(1.0 + 0.10 * start - 0.22 * end, 0.65, 1.12)
+        w = W * (0.11 + 1.05 * chisel) * (0.82 + 0.28 * p) * taper
+        v0 = 32.0
+        dens = (0.58 + 0.72 * (v0 / (v + v0))) * (1.0 + 0.52 * end + 0.22 * start)
+        feather = 0.32
+        grain = 0.22
+        rim_halo = 0.52
     else:  # fall back to ballpoint-like
         w = np.full(n, W)
         dens = np.ones(n)
-    return PenSample(np.asarray(w, np.float64), np.asarray(dens, np.float64), grain, feather)
+    return PenSample(
+        np.asarray(w, np.float64),
+        np.asarray(dens, np.float64),
+        grain,
+        feather,
+        rim_halo=rim_halo,
+        dry_streak=dry_streak,
+        porous_threshold=porous_threshold,
+        dryness=dryness,
+    )
