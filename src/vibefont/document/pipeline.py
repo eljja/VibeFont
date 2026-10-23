@@ -80,12 +80,25 @@ def write_document(text: str, spec: VibeSpec, gen: StrokeGenerator, rng: np.rand
                     return pages
                 pages.append(Page(w_mm, h_mm))
                 line_idx = 0
-            x = left + st.margin_offset_mm
-            y = bases[line_idx] + st.baseline_offset_mm
-            pages[-1].lines.append(_place(ink, spec, st, x, y, slant_w))
+            placed_line = _place(ink, spec, st, left + st.margin_offset_mm, bases[line_idx] + st.baseline_offset_mm, slant_w)
+            if spec.layout.align == "center" and len(placed_line):
+                lx0, _, lx1, _ = placed_line.bbox()
+                lw = lx1 - lx0
+                target_x = 0.5 * (w_mm - lw) + 0.35 * st.margin_offset_mm
+                placed_line = placed_line.translate(target_x - lx0, 0.0)
+            pages[-1].lines.append(placed_line)
             context.append(ink)
             words = words[n:]
             line_idx += 1
+
+    if spec.layout.v_align == "center":
+        for page in pages:
+            non_empty = [ln for ln in page.lines if len(ln)]
+            if non_empty:
+                ymin = min(ln.bbox()[1] for ln in non_empty)
+                ymax = max(ln.bbox()[3] for ln in non_empty)
+                dy = 0.5 * page.height_mm - 0.5 * (ymin + ymax)
+                page.lines = [ln.translate(0.0, dy) for ln in page.lines]
     return pages
 
 

@@ -56,6 +56,8 @@ class LayoutSpec:
     page: str = "A4"
     margin_mm: tuple[float, float, float, float] = (20.0, 20.0, 20.0, 20.0)  # top right bottom left
     line_height_mm: float = 9.0  # used for plain paper; ruled paper snaps to its lines
+    align: str = "left"  # "left" | "center"
+    v_align: str = "top"  # "top" | "center"
 
 
 @dataclass

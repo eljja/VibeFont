@@ -45,6 +45,12 @@ def interpret(prompt: str, base: VibeSpec | None = None) -> VibeSpec:
             for k, dv in rule.delta.items():
                 setattr(spec.style, k, getattr(spec.style, k) + f * dv)
             if f > 0:
+                if (
+                    rule.name == "pen_calligraphy"
+                    and spec.pen.type == "brush"
+                    and not any(k in clause for k in ("broad nib", "평촉"))
+                ):
+                    continue
                 spec.update(rule.set)
         for keys, rgb in COLORS.items():
             if any(k in clause for k in keys):

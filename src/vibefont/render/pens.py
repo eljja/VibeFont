@@ -98,7 +98,10 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         dens = np.full(n, 1.15)
         dens *= 1.0 + 0.3 * start
     elif pen.type == "fountain":
-        w = W * (0.70 + 0.55 * p)
+        th = _direction(ink)
+        nib_mod = 0.84 + 0.30 * np.abs(np.sin(th - np.radians(38.0)))
+        taper = np.clip(1.0 + 0.12 * start - 0.32 * end, 0.55, 1.12)
+        w = W * (0.68 + 0.56 * p) * nib_mod * taper
         v0 = 35.0
         dens = 0.55 + 0.85 * v0 / (v + v0)  # slow -> pooling
         dens *= 1.0 + 0.45 * end + 0.2 * start
@@ -115,9 +118,10 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         grain = 0.05
         feather = 0.3
     elif pen.type == "brush":
-        w = W * (0.12 + 1.0 * np.power(p, 1.3))
-        dens = 1.2 * (1.0 - 0.5 * np.clip((v - 120.0) / 300.0, 0, 1))
-        grain = 0.5
+        taper = np.clip(1.0 + 0.28 * start - 0.65 * end, 0.16, 1.25)
+        w = W * (0.14 + 0.98 * np.power(p, 1.25)) * taper
+        dens = 1.25 * (1.0 - 0.48 * np.clip((v - 120.0) / 300.0, 0, 1))
+        grain = 0.55
     elif pen.type == "broad_nib":
         th = _direction(ink)
         w = W * np.abs(np.sin(th - np.radians(pen.nib_angle_deg))) + 0.12 * W

@@ -119,7 +119,7 @@ class ModelGenerator:
         seed = int(req.rng.integers(0, 2**31 - 1))
         torch_gen = torch.Generator(device=self.device).manual_seed(seed)
 
-        sigma_bins = 1.2 + 1.0 * (1.0 - req.state.neatness)
+        sigma_bins = 1.15 + 0.45 * (1.0 - req.state.neatness)
         chunk_size = 1500
         mod_chunks: list[np.ndarray] = []
         for start in range(0, len(base_stack), chunk_size):
@@ -163,8 +163,9 @@ class ModelGenerator:
             rel_base = b_xy - b_xy[0:1]
             t_lin = np.linspace(0.0, 1.0, len(rel_mod), dtype=np.float32)[:, None]
             drift_corr = t_lin * (rel_mod[-1:] - rel_base[-1:])
-            rel_mod_pinned = rel_mod - 0.80 * drift_corr
-            blended_rel = 0.60 * rel_base + 0.40 * rel_mod_pinned
+            rel_mod_pinned = rel_mod - 0.90 * drift_corr
+            resid = np.clip(rel_mod_pinned - rel_base, -0.18, 0.18)
+            blended_rel = rel_base + 0.35 * resid
             if len(blended_rel) >= 3:
                 blended_rel[1:-1] = (
                     0.2 * blended_rel[:-2] + 0.6 * blended_rel[1:-1] + 0.2 * blended_rel[2:]

@@ -135,3 +135,59 @@ def test_complex_jungseong_full_height_and_jongseong_rhythm():
     assert gak_h > ga_h + 0.12, f"Expected jongseong syllable '각' ({gak_h:.2f}) taller than '가' ({ga_h:.2f})"
 
 
+def test_hangul_kid_mode_vs_master_cursive_and_calligraphy():
+    from vibefont.generate.hangul import hangul_char_strokes
+
+    # Master cursive mode should connect more strokes than clumsy kid mode
+    rng_m = np.random.default_rng(7)
+    rng_k = np.random.default_rng(7)
+    st_master = hangul_char_strokes("글", rng=rng_m, connectedness=0.92, neatness=0.92)
+    st_kid = hangul_char_strokes("글", rng=rng_k, connectedness=0.05, neatness=0.10)
+    assert len(st_master) < len(st_kid), f"Expected fewer (more connected) strokes in master cursive: {len(st_master)} vs {len(st_kid)}"
+
+    # Clumsy kid mode should exhibit significantly higher bounding-box height variance across samples
+    master_heights = []
+    kid_heights = []
+    for s in range(25):
+        pm = np.concatenate(hangul_char_strokes("한", rng=np.random.default_rng(100 + s), connectedness=0.88, neatness=0.92), axis=0)
+        pk = np.concatenate(hangul_char_strokes("한", rng=np.random.default_rng(100 + s), connectedness=0.05, neatness=0.10), axis=0)
+        master_heights.append(float(pm[:, 1].max() - pm[:, 1].min()))
+        kid_heights.append(float(pk[:, 1].max() - pk[:, 1].min()))
+    assert np.std(kid_heights) > np.std(master_heights) * 1.8
+
+
+def test_layout_center_and_vertical_center_alignment():
+    from vibefont.document.pipeline import write_document
+    from vibefont.vibe.spec import VibeSpec
+
+    gen = ProceduralGenerator()
+    spec = VibeSpec()
+    spec.layout.page = "Card"
+    spec.layout.align = "center"
+    spec.layout.v_align = "center"
+    pages = write_document("꽃이 피는 봄날", spec, gen, rng=np.random.default_rng(42))
+    page = pages[0]
+    assert len(page.lines) == 1
+    xmin, ymin, xmax, ymax = page.lines[0].bbox()
+    line_center_x = 0.5 * (xmin + xmax)
+    line_center_y = 0.5 * (ymin + ymax)
+    assert abs(line_center_x - 0.5 * page.width_mm) < 12.0
+    assert abs(line_center_y - 0.5 * page.height_mm) < 18.0
+
+
+def test_brush_vs_broad_nib_calligraphy_lexicon():
+    from vibefont.vibe.interpreter import interpret
+
+    spec_brush = interpret("아이보리 종이에 먹색 붓으로 힘차고 우아하게 쓴 캘리그라피")
+    assert spec_brush.pen.type == "brush"
+
+    spec_brush_en = interpret("ivory paper, charcoal sumi brush, calligraphy, bold graceful slow cursive")
+    assert spec_brush_en.pen.type == "brush"
+
+    spec_broad = interpret("아이보리 종이에 버건디 잉크 평촉으로 우아하게 쓴 캘리그라피")
+    assert spec_broad.pen.type == "broad_nib"
+
+
+
+
+

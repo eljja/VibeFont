@@ -204,10 +204,14 @@ def choseong_strokes(
     return []
 
 
-def jungseong_strokes(idx: int) -> list[np.ndarray]:
+def jungseong_strokes(idx: int, connectedness: float = 0.5) -> list[np.ndarray]:
     """Returns list of smooth curved (M, 2) strokes in normalized [0, 1] x [0, 1] box."""
-    v_main = lambda x: _curve([[x, 0.02], [x - 0.02, 0.52], [x, 0.98]], 12)
-    h_main = lambda y: _curve([[0.04, y + 0.03], [0.50, y - 0.01], [0.96, y - 0.04]], 11)
+    if connectedness >= 0.72:
+        v_main = lambda x: _curve([[x - 0.03, 0.05], [x + 0.01, 0.02], [x - 0.02, 0.54], [x, 0.97], [x - 0.05, 0.91]], 14)
+        h_main = lambda y: _curve([[0.02, y + 0.05], [0.28, y - 0.02], [0.68, y + 0.01], [0.97, y - 0.05]], 13)
+    else:
+        v_main = lambda x: _curve([[x, 0.02], [x - 0.02, 0.52], [x, 0.98]], 12)
+        h_main = lambda y: _curve([[0.04, y + 0.03], [0.50, y - 0.01], [0.96, y - 0.04]], 11)
 
     if idx == 0:  # ㅏ
         return [v_main(0.42), _curve([[0.42, 0.48], [0.70, 0.46], [0.94, 0.44]], 8)]
@@ -356,13 +360,17 @@ def _transform_strokes(
     w: float,
     h: float,
     rng: np.random.Generator | None = None,
+    neatness: float = 0.6,
 ) -> list[np.ndarray]:
     if rng is not None:
-        x += float(rng.normal(0.0, 0.022 * w))
-        y += float(rng.normal(0.0, 0.022 * h))
-        w *= float(np.exp(rng.normal(0.0, 0.035)))
-        h *= float(np.exp(rng.normal(0.0, 0.035)))
-        rot = float(np.radians(rng.normal(0.0, 1.2)))
+        clumsy = max(0.25, 1.85 - 1.65 * float(np.clip(neatness, 0.0, 1.0)))
+        dx = float(np.clip(rng.normal(0.0, 0.018 * w * clumsy), -0.045 * w, 0.045 * w))
+        dy = float(np.clip(rng.normal(0.0, 0.018 * h * clumsy), -0.045 * h, 0.045 * h))
+        x += dx
+        y += dy
+        w *= float(np.clip(np.exp(rng.normal(0.0, 0.028 * clumsy)), 0.88, 1.13))
+        h *= float(np.clip(np.exp(rng.normal(0.0, 0.028 * clumsy)), 0.88, 1.13))
+        rot = float(np.radians(np.clip(rng.normal(0.0, 1.1 * clumsy), -3.5, 3.5)))
     else:
         rot = 0.0
 
@@ -388,15 +396,17 @@ def _soft_connect(strokes: list[np.ndarray], connectedness: float, rng: np.rando
     """Cursive ligature: occasionally connects nearby consecutive strokes within a syllable."""
     if connectedness < 0.35 or len(strokes) < 2:
         return strokes
-    p_link = 0.55 * (connectedness - 0.3)
+    p_link = min(0.92, 0.72 * (connectedness - 0.25))
+    max_dist = 0.92 if connectedness >= 0.75 else 0.55
     out = [strokes[0]]
     for s in strokes[1:]:
         prev_end = out[-1][-1]
         cur_start = s[0]
         dist = float(np.linalg.norm(cur_start - prev_end))
         roll = float(rng.random()) if rng is not None else 0.5
-        if dist < 0.55 and roll < p_link:
-            bridge = _curve([prev_end.tolist(), cur_start.tolist()], n=6)
+        if dist < max_dist and roll < p_link:
+            mid = 0.5 * (prev_end + cur_start) + np.array([0.0, 0.03 * dist])
+            bridge = _curve([prev_end.tolist(), mid.tolist(), cur_start.tolist()], n=6)
             out[-1] = np.concatenate([out[-1], bridge[1:-1], s], axis=0)
         else:
             out.append(s)
@@ -407,6 +417,7 @@ def syllable_strokes(
     char: str,
     rng: np.random.Generator | None = None,
     connectedness: float = 0.5,
+    neatness: float = 0.6,
 ) -> list[np.ndarray]:
     """Given a Hangul syllable, returns natural handwriting strokes.
 
@@ -424,7 +435,7 @@ def syllable_strokes(
 
     has_jong = f_idx > 0
     c_st = choseong_strokes(c_idx, rng=rng, connectedness=connectedness)
-    j_st = jungseong_strokes(j_idx)
+    j_st = jungseong_strokes(j_idx, connectedness=connectedness)
     f_st = jongseong_strokes(f_idx, rng=rng, connectedness=connectedness)
 
     # Syllables without jongseong are slightly more compact vertically than 3-tier syllables with jongseong
@@ -441,31 +452,31 @@ def syllable_strokes(
 
     if j_idx in JUNGSEONG_VERTICAL:
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.04 * W, Y_TOP + 0.08 * H, 0.44 * W, 0.80 * H, rng)
-            strokes += _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.46 * W, 0.94 * H, rng)
+            strokes += _transform_strokes(c_st, 0.04 * W, Y_TOP + 0.08 * H, 0.44 * W, 0.80 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.46 * W, 0.94 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.05 * W, Y_TOP + 0.05 * H, 0.43 * W, 0.50 * H, rng)
-            strokes += _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.45 * W, 0.56 * H, rng)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.60 * H, 0.68 * W, 0.37 * H, rng)
+            strokes += _transform_strokes(c_st, 0.05 * W, Y_TOP + 0.05 * H, 0.43 * W, 0.50 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.45 * W, 0.56 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.60 * H, 0.68 * W, 0.37 * H, rng, neatness=neatness)
 
     elif j_idx in JUNGSEONG_HORIZONTAL:
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.16 * W, Y_TOP + 0.04 * H, 0.66 * W, 0.46 * H, rng)
-            strokes += _transform_strokes(j_st, 0.05 * W, Y_TOP + 0.52 * H, 0.90 * W, 0.44 * H, rng)
+            strokes += _transform_strokes(c_st, 0.16 * W, Y_TOP + 0.04 * H, 0.66 * W, 0.46 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(j_st, 0.05 * W, Y_TOP + 0.52 * H, 0.90 * W, 0.44 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.18 * W, Y_TOP + 0.03 * H, 0.64 * W, 0.36 * H, rng)
-            strokes += _transform_strokes(j_st, 0.06 * W, Y_TOP + 0.40 * H, 0.88 * W, 0.24 * H, rng)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.65 * H, 0.68 * W, 0.33 * H, rng)
+            strokes += _transform_strokes(c_st, 0.18 * W, Y_TOP + 0.03 * H, 0.64 * W, 0.36 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(j_st, 0.06 * W, Y_TOP + 0.40 * H, 0.88 * W, 0.24 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.65 * H, 0.68 * W, 0.33 * H, rng, neatness=neatness)
 
     else:
         # Complex vowel (ㅘ, ㅙ, ㅚ, ㅝ, ㅞ, ㅟ, ㅢ): j_st spans from top (Y_TOP + 0.02*H) so right vertical stem is full-height!
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.05 * H, 0.44 * W, 0.42 * H, rng)
-            strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.94 * H, rng)
+            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.05 * H, 0.44 * W, 0.42 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.94 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.03 * H, 0.44 * W, 0.30 * H, rng)
-            strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.58 * H, rng)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.63 * H, 0.68 * W, 0.35 * H, rng)
+            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.03 * H, 0.44 * W, 0.30 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.58 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.63 * H, 0.68 * W, 0.35 * H, rng, neatness=neatness)
 
     return _soft_connect(strokes, connectedness, rng)
 
@@ -485,16 +496,17 @@ def hangul_char_strokes(
     char: str,
     rng: np.random.Generator | None = None,
     connectedness: float = 0.5,
+    neatness: float = 0.6,
 ) -> list[np.ndarray]:
     code = ord(char)
     if 0xAC00 <= code <= 0xD7A3:
-        return syllable_strokes(char, rng=rng, connectedness=connectedness)
+        return syllable_strokes(char, rng=rng, connectedness=connectedness, neatness=neatness)
     if char in CHOSEONG_NAMES:
         idx = CHOSEONG_NAMES.index(char)
-        st = _transform_strokes(choseong_strokes(idx), 0.1, -1.35, 1.15, 1.35, rng)
+        st = _transform_strokes(choseong_strokes(idx), 0.1, -1.35, 1.15, 1.35, rng, neatness=neatness)
         return _soft_connect(st, connectedness, rng)
     if char in JUNGSEONG_NAMES:
         idx = JUNGSEONG_NAMES.index(char)
-        st = _transform_strokes(jungseong_strokes(idx), 0.1, -1.35, 1.15, 1.35, rng)
+        st = _transform_strokes(jungseong_strokes(idx, connectedness=connectedness), 0.1, -1.35, 1.15, 1.35, rng, neatness=neatness)
         return _soft_connect(st, connectedness, rng)
     return []

@@ -52,6 +52,7 @@ class _Font:
         word: str,
         rng: np.random.Generator | None = None,
         connectedness: float = 0.5,
+        neatness: float = 0.6,
     ) -> tuple[list[np.ndarray], float]:
         """Character-by-character Latin synthesis with per-glyph jitter so repeated letters never match."""
         if rng is None:
@@ -69,6 +70,10 @@ class _Font:
             width = float(all_norm[:, 0].max() - min_x)
             return out, max(width, 0.1)
 
+        clumsy = max(0.35, 1.75 - 1.50 * float(np.clip(neatness, 0.0, 1.0)))
+        if neatness < 0.30:
+            clumsy *= 1.45
+
         out_strokes: list[np.ndarray] = []
         cursor_x = 0.0
         for ch in word:
@@ -85,10 +90,10 @@ class _Font:
             cw = max(max_nx - min_nx, 0.18)
 
             # Per-character micro-variation (prevents identical double letters like 'll', 'ee', 'oo')
-            sx = float(np.exp(rng.normal(0.0, 0.045)))
-            sy = float(np.exp(rng.normal(0.0, 0.045)))
-            dy = float(rng.normal(0.0, 0.024))
-            d_slant = float(np.tan(np.radians(rng.normal(0.0, 1.6))))
+            sx = float(np.clip(np.exp(rng.normal(0.0, 0.042 * clumsy)), 0.80, 1.22))
+            sy = float(np.clip(np.exp(rng.normal(0.0, 0.042 * clumsy)), 0.80, 1.22))
+            dy = float(np.clip(rng.normal(0.0, 0.024 * clumsy), -0.14, 0.14))
+            d_slant = float(np.tan(np.radians(np.clip(rng.normal(0.0, 1.6 * clumsy), -6.0, 6.0))))
 
             ch_placed: list[np.ndarray] = []
             for s in norm_c:
@@ -114,7 +119,7 @@ class _Font:
 
             out_strokes.extend(ch_placed)
             actual_max_x = max(float(s[:, 0].max()) for s in ch_placed)
-            kern_jitter = float(rng.normal(0.0, 0.02))
+            kern_jitter = float(rng.normal(0.0, 0.02 * clumsy))
             kern_base = 0.04 if connectedness >= 0.4 else (0.24 if cw < 0.25 else 0.21)
             cursor_x = max(cursor_x + 0.22, actual_max_x + max(0.02, kern_base + kern_jitter))
 
@@ -131,9 +136,10 @@ class _Font:
         word: str,
         rng: np.random.Generator | None = None,
         connectedness: float = 0.5,
+        neatness: float = 0.6,
     ) -> tuple[list[np.ndarray], float]:
         if not any(is_hangul(c) for c in word):
-            return self._latin_word_strokes(word, rng=rng, connectedness=connectedness)
+            return self._latin_word_strokes(word, rng=rng, connectedness=connectedness, neatness=neatness)
 
         # Mixed or pure Hangul
         runs: list[tuple[bool, str]] = []
@@ -154,29 +160,32 @@ class _Font:
         all_strokes: list[np.ndarray] = []
         cursor_x = 0.0
         gap = 0.22
+        clumsy = max(0.35, 1.75 - 1.50 * float(np.clip(neatness, 0.0, 1.0)))
+        if neatness < 0.30:
+            clumsy *= 1.35
 
         for is_h, text in runs:
             if is_h:
                 for ch in text:
-                    ch_strokes = hangul_char_strokes(ch, rng=rng, connectedness=connectedness)
+                    ch_strokes = hangul_char_strokes(ch, rng=rng, connectedness=connectedness, neatness=neatness)
                     if ch_strokes:
                         ch_pts = np.concatenate(ch_strokes, axis=0)
                         ch_x0 = float(ch_pts[:, 0].min())
                         ch_w = float(ch_pts[:, 0].max() - ch_x0)
-                        sy_jit = float(np.exp(rng.normal(0.0, 0.032))) if rng is not None else 1.0
-                        sx_jit = float(np.exp(rng.normal(0.0, 0.032))) if rng is not None else 1.0
-                        dy_jit = float(rng.normal(0.0, 0.030)) if rng is not None else 0.0
+                        sy_jit = float(np.clip(np.exp(rng.normal(0.0, 0.032 * clumsy)), 0.84, 1.18)) if rng is not None else 1.0
+                        sx_jit = float(np.clip(np.exp(rng.normal(0.0, 0.032 * clumsy)), 0.84, 1.18)) if rng is not None else 1.0
+                        dy_jit = float(np.clip(rng.normal(0.0, 0.026 * clumsy), -0.12, 0.12)) if rng is not None else 0.0
                         for s in ch_strokes:
                             sp = s.copy()
                             sp[:, 0] = (sp[:, 0] - ch_x0) * sx_jit + cursor_x
                             sp[:, 1] = sp[:, 1] * sy_jit + dy_jit
                             all_strokes.append(sp)
-                        gap_jit = float(rng.normal(0.0, 0.025)) if rng is not None else 0.0
-                        cursor_x += max(ch_w * sx_jit, 1.28) + max(0.08, gap + gap_jit)
+                        gap_jit = float(rng.normal(0.0, 0.025 * clumsy)) if rng is not None else 0.0
+                        cursor_x += max(ch_w * sx_jit, 1.28) + max(0.06, gap + gap_jit)
                     else:
                         cursor_x += 0.9
             else:
-                norm_s, w = self._latin_word_strokes(text, rng=rng, connectedness=connectedness)
+                norm_s, w = self._latin_word_strokes(text, rng=rng, connectedness=connectedness, neatness=neatness)
                 if norm_s:
                     for s in norm_s:
                         sp = np.stack([s[:, 0] + cursor_x, s[:, 1]], axis=1)
@@ -257,7 +266,7 @@ class ProceduralGenerator:
         all_strokes: list[np.ndarray] = []
         cursor = 0.0
         for word in req.text.split():
-            strokes, width = f.word(word, rng=rng, connectedness=st.connectedness)
+            strokes, width = f.word(word, rng=rng, connectedness=st.connectedness, neatness=ls.neatness)
             if not strokes:
                 cursor += width
                 continue
@@ -268,14 +277,16 @@ class ProceduralGenerator:
                 strokes = [np.stack([gaussian_filter1d(s[:, 0], sig, mode="nearest"),
                                      gaussian_filter1d(s[:, 1], sig, mode="nearest")], 1) if len(s) > 4 else s
                            for s in strokes]
-            strokes = _deform(strokes, 0.02 + 0.09 * loose, rng)
+            has_h = any(is_hangul(c) for c in word)
+            deform_amp = (0.014 + 0.032 * loose) if has_h else (0.02 + 0.065 * loose)
+            strokes = _deform(strokes, deform_amp, rng)
             # per-word jitter
-            sc = float(np.exp(rng.normal(0.0, 0.02 + 0.04 * loose)))
-            rot = np.radians(rng.normal(0.0, 0.5 + 1.5 * loose))
-            base_slant = 0.45 * ls.slant_deg if any(is_hangul(c) for c in word) else ls.slant_deg
-            slant = base_slant + rng.normal(0.0, 1.0 + 2.5 * (1 - st.consistency))
+            sc = float(np.clip(np.exp(rng.normal(0.0, 0.02 + 0.035 * loose)), 0.88, 1.13))
+            rot = np.radians(np.clip(rng.normal(0.0, 0.4 + 1.1 * loose), -2.2, 2.2))
+            base_slant = 0.45 * ls.slant_deg if has_h else ls.slant_deg
+            slant = base_slant + float(np.clip(rng.normal(0.0, 1.0 + 2.0 * (1 - st.consistency)), -5.0, 5.0))
             k = np.tan(np.radians(slant))
-            dy = rng.normal(0.0, 0.03 + 0.08 * st.baseline_wobble)
+            dy = float(np.clip(rng.normal(0.0, 0.025 + 0.06 * st.baseline_wobble), -0.14, 0.14))
             sx = st.width_scale * st.letter_spacing
             c, s_ = np.cos(rot), np.sin(rot)
             placed = []

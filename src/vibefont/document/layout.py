@@ -10,7 +10,14 @@ import numpy as np
 from ..ink import Ink
 from ..vibe.spec import VibeSpec
 
-PAGE_SIZES_MM = {"A4": (210.0, 297.0), "A5": (148.0, 210.0), "Letter": (215.9, 279.4), "B5": (176.0, 250.0)}
+PAGE_SIZES_MM = {
+    "A4": (210.0, 297.0),
+    "A5": (148.0, 210.0),
+    "Letter": (215.9, 279.4),
+    "B5": (176.0, 250.0),
+    "Card": (165.0, 125.0),
+    "Square": (160.0, 160.0),
+}
 
 
 @dataclass
