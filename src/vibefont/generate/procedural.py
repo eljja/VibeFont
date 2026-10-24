@@ -19,6 +19,7 @@ from ..ink import P, X, Ink
 from ..preprocess import pseudo_pressure
 from ..vibe.spec import StyleSpec
 from .base import LineRequest
+from .glyph_guard import validate_text_glyphs
 from .hangul import WriterProfile, hangul_char_strokes, is_hangul, sample_writer_profile
 from .kinematics import densify, strokes_to_ink
 from .ligature import PlacedGlyph, connect_word
@@ -72,6 +73,7 @@ class _Font:
         neatness: float = 0.6,
         profile: WriterProfile | None = None,
     ) -> list[PlacedGlyph]:
+        word = validate_text_glyphs(word, allow_hangul=True)
         clumsy = max(0.45, 1.65 - 1.25 * float(np.clip(neatness, 0.0, 1.0)))
         prof_w = float(np.clip(profile.w_scale if profile is not None else 1.0, 0.88, 1.14))
         prof_h = float(np.clip(0.98 + 0.25 * ((profile.h_scale if profile is not None else 1.0) - 1.0), 0.92, 1.08))
@@ -169,6 +171,7 @@ class _Font:
         neatness: float = 0.6,
         profile: WriterProfile | None = None,
     ) -> tuple[list[np.ndarray], float]:
+        word = validate_text_glyphs(word, allow_hangul=True)
         if not any(is_hangul(c) for c in word):
             return self._latin_word_strokes(word, rng=rng, connectedness=connectedness, neatness=neatness, profile=profile)
 

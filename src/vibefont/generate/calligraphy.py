@@ -21,6 +21,7 @@ import numpy as np
 from ..document.layout import Page, page_size
 from ..ink import EOS, NCOLS, P, T, X, Y, Ink
 from ..vibe.spec import VibeSpec
+from .glyph_guard import validate_text_glyphs
 from .hangul import WriterProfile, _curve, hangul_char_strokes, is_hangul, sample_writer_profile
 from .kinematics import densify
 from .procedural import ProceduralGenerator
@@ -30,7 +31,7 @@ from .semantics import SemanticArchetype, WordMorphology, analyze_semantics
 _KO_PARTICLES = (
     "에서도", "에게는", "으로의", "이라는", "이라도", "처럼", "부터", "까지", "마다",
     "에서", "에게", "으로", "에는", "에도", "이라", "보다",
-    "은", "는", "이", "가", "을", "를", "의", "에", "도", "로", "와", " 과", "만",
+    "은", "는", "이", "가", "을", "를", "의", "에", "도", "로", "와", "과", "만",
 )
 
 # English short function words rendered smaller & lighter to emphasize hero words
@@ -257,14 +258,17 @@ def _strokes_to_calligraphy_ink(
     placed_strokes: list[tuple[np.ndarray, float, bool]],
     text: str,
     has_ko: bool = True,
+    glyphs: list[dict] | None = None,
 ) -> Ink:
     """Converts list of (xy_mm, stroke_weight, is_flourish_or_tail) in page mm into timed, pressure-sculpted Ink."""
     rows = []
     t = 0.0
     for xy_mm, s_weight, is_special in placed_strokes:
+        if len(xy_mm) == 0:
+            continue
         dense = densify(xy_mm, 0.08)
         if len(dense) < 2:
-            continue
+            dense = np.concatenate([xy_mm[:1], xy_mm[:1] + np.array([[0.05, 0.05]], dtype=np.float32)], axis=0)
         is_flourish = is_special and (s_weight <= 0.01)
         is_tail = is_special and (s_weight > 0.01)
         p = _calligraphic_pressure_from_geometry(
@@ -317,7 +321,10 @@ def _strokes_to_calligraphy_ink(
         t = float(r[-1, T]) + 0.06
 
     pts = np.concatenate(rows, axis=0) if rows else np.zeros((0, NCOLS), dtype=np.float32)
-    return Ink(pts, text=text, meta={"generator": "calligraphy"})
+    meta = {"generator": "calligraphy"}
+    if glyphs is not None:
+        meta["glyphs"] = glyphs
+    return Ink(pts, text=text, meta=meta)
 
 
 def compose_calligraphy_page(
@@ -328,6 +335,7 @@ def compose_calligraphy_page(
     """Composes a complete artistic calligraphy card page (Korean or English)."""
     rng = rng or np.random.default_rng(spec.seed)
     text = text.replace("\\n", "\n").strip()
+    text = validate_text_glyphs(text, allow_hangul=True)
     spec.layout.page = "Card"
     w_mm, h_mm = page_size(spec)
     page = Page(w_mm, h_mm)
@@ -377,12 +385,14 @@ def compose_calligraphy_page(
 
     # 2. Build normalized strokes for each line
     all_line_strokes_norm: list[list[tuple[np.ndarray, float, bool]]] = []
+    all_line_glyphs: list[list[dict]] = []
 
     for line_idx, line_str in enumerate(raw_lines):
         words = line_str.split()
         m_list = semantic_lines[line_idx]
         line_fac = line_scale_factors[line_idx]
         line_strokes_norm: list[tuple[np.ndarray, float, bool]] = []
+        line_glyphs: list[dict] = []
         cursor_x = 0.0
 
         if has_ko:
@@ -400,21 +410,28 @@ def compose_calligraphy_page(
                     dy = float(rng.uniform(-0.12, 0.12)) + (-0.08 if c_i % 2 == 1 else 0.04)
                     rot = np.radians(float(rng.uniform(-3.0, 2.5)))
                     c_rot, s_rot = np.cos(rot), np.sin(rot)
-                    sculpted = _sculpt_ko_syllable_strokes(
-                        ch, rng, is_hero=is_hero_stem, is_word_end=is_end, profile=profile, morph=m_stem
-                    )
+                    if is_hangul(ch):
+                        sculpted = _sculpt_ko_syllable_strokes(
+                            ch, rng, is_hero=is_hero_stem, is_word_end=is_end, profile=profile, morph=m_stem
+                        )
+                    else:
+                        w_st, _ = script_font.word(ch, rng=rng, connectedness=0.0, neatness=0.88, profile=profile)
+                        sculpted = [(s, 0.70, False) for s in w_st]
                     if not sculpted:
                         cursor_x += 0.9 * sc
                         continue
                     all_p = np.concatenate([p for p, _, _ in sculpted], axis=0)
                     x0 = float(all_p[:, 0].min())
-                    ch_w = float(all_p[:, 0].max() - x0)
+                    ch_w = max(float(all_p[:, 0].max() - x0), 0.20)
+                    start_s = len(line_strokes_norm)
                     for pts, s_weight, is_tail in sculpted:
                         px = (pts[:, 0] - x0) * sc
                         py = pts[:, 1] * sc + dy
                         rx = c_rot * px - s_rot * py + cursor_x
                         ry = s_rot * px + c_rot * py
                         line_strokes_norm.append((np.stack([rx, ry], axis=1), s_weight, is_tail))
+                    end_s = len(line_strokes_norm)
+                    line_glyphs.append({"ch": ch, "strokes": (start_s, end_s)})
                     cursor_x += (ch_w * sc) + 0.26 * sc
 
                 # Render trailing grammatical particle smaller & tucked tightly beside stem
@@ -423,19 +440,30 @@ def compose_calligraphy_page(
                     for c_i, ch in enumerate(particle):
                         sc = part_sc * float(rng.uniform(0.96, 1.04))
                         dy = float(rng.uniform(-0.04, 0.10))
-                        sculpted = _sculpt_ko_syllable_strokes(
-                            ch, rng, is_hero=False, is_word_end=(c_i == len(particle) - 1), profile=profile, morph=m_part
-                        )
+                        rot = np.radians(float(rng.uniform(-2.5, 2.0)))
+                        c_rot, s_rot = np.cos(rot), np.sin(rot)
+                        if is_hangul(ch):
+                            sculpted = _sculpt_ko_syllable_strokes(
+                                ch, rng, is_hero=False, is_word_end=(c_i == len(particle) - 1), profile=profile, morph=m_part
+                            )
+                        else:
+                            w_st, _ = script_font.word(ch, rng=rng, connectedness=0.0, neatness=0.88, profile=profile)
+                            sculpted = [(s, 0.70, False) for s in w_st]
                         if not sculpted:
                             cursor_x += 0.5 * sc
                             continue
                         all_p = np.concatenate([p for p, _, _ in sculpted], axis=0)
                         x0 = float(all_p[:, 0].min())
-                        ch_w = float(all_p[:, 0].max() - x0)
+                        ch_w = max(float(all_p[:, 0].max() - x0), 0.20)
+                        start_s = len(line_strokes_norm)
                         for pts, s_weight, is_tail in sculpted:
-                            px = (pts[:, 0] - x0) * sc + cursor_x
+                            px = (pts[:, 0] - x0) * sc
                             py = pts[:, 1] * sc + dy
+                            rx = c_rot * px - s_rot * py + cursor_x
+                            ry = s_rot * px + c_rot * py
                             line_strokes_norm.append((np.stack([rx, ry], axis=1), s_weight, is_tail))
+                        end_s = len(line_strokes_norm)
+                        line_glyphs.append({"ch": ch, "strokes": (start_s, end_s)})
                         cursor_x += (ch_w * sc) + 0.18 * sc
 
                 cursor_x += 0.85 * line_fac
@@ -455,6 +483,7 @@ def compose_calligraphy_page(
                 slant_k = np.tan(np.radians(16.0))
                 word_dy = float(rng.uniform(-0.05, 0.05))
                 placed_w: list[np.ndarray] = []
+                start_s = len(line_strokes_norm)
                 for s_i, s in enumerate(w_strokes):
                     px = s[:, 0] * sc
                     py = s[:, 1] * sc + word_dy
@@ -478,10 +507,13 @@ def compose_calligraphy_page(
                     is_tail = (w_idx == len(words) - 1 and s_i == len(w_strokes) - 1)
                     line_strokes_norm.append((pts, s_weight, is_tail))
 
+                end_s = len(line_strokes_norm)
+                line_glyphs.append({"ch": word, "strokes": (start_s, end_s)})
                 all_wp = np.concatenate(placed_w, axis=0)
                 cursor_x = float(all_wp[:, 0].max()) + 0.70 * sc
 
         all_line_strokes_norm.append(line_strokes_norm)
+        all_line_glyphs.append(line_glyphs)
 
     # 3. Global layout scaling to fit card margins while preserving line hierarchy
     max_line_w_raw = 1e-3
@@ -497,7 +529,7 @@ def compose_calligraphy_page(
     eff_pitch_mm = line_pitch * min(1.0, (h_mm - 28.0) / max(len(raw_lines) * line_pitch, 1e-3))
 
     line_inks: list[Ink] = []
-    for line_idx, (line_str, lsn) in enumerate(zip(raw_lines, all_line_strokes_norm)):
+    for line_idx, (line_str, lsn, l_glyphs) in enumerate(zip(raw_lines, all_line_strokes_norm, all_line_glyphs)):
         if not lsn:
             continue
         all_pts = np.concatenate([p for p, _, _ in lsn], axis=0)
@@ -519,7 +551,7 @@ def compose_calligraphy_page(
             )
             mm_strokes.append((xy_mm, s_weight, is_tail))
 
-        line_inks.append(_strokes_to_calligraphy_ink(mm_strokes, text=line_str, has_ko=has_ko))
+        line_inks.append(_strokes_to_calligraphy_ink(mm_strokes, text=line_str, has_ko=has_ko, glyphs=l_glyphs))
 
     page.lines = line_inks
 

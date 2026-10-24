@@ -145,12 +145,17 @@ class ModelGenerator:
         mod_ink = self.tokenizer.decode(TokenSeq.from_stack(mod_np), text=req.text)
 
         # Strong hybrid neural modulation: reshape stroke interior curvature, scale, and anchor placement
-        n_pts = min(len(base_ink), len(mod_ink))
-        pts = base_ink.points[:n_pts].copy()
-        mod_pts = mod_ink.points[:n_pts]
-
-        # Transfer neural velocity/timing profile
-        pts[:, T] = mod_pts[:, T]
+        # Never truncate the base scaffold so trailing characters/words are never dropped
+        n_mod = min(len(base_ink), len(mod_ink))
+        pts = base_ink.points.copy()
+        if n_mod > 0:
+            mod_pts = mod_ink.points[:n_mod]
+            pts[:n_mod, T] = mod_pts[:, T]
+            if n_mod < len(base_ink):
+                dt = base_ink.points[n_mod:, T] - base_ink.points[n_mod - 1, T]
+                pts[n_mod:, T] = pts[n_mod - 1, T] + np.maximum(dt, 0.01)
+        else:
+            mod_pts = np.zeros((0, base_ink.points.shape[1]), dtype=base_ink.points.dtype)
 
         loose = max(0.35, 1.35 - req.state.neatness)
         # Very low-frequency phrase/word rhythm wave (wavelength 18..45 x-heights) so all strokes
@@ -163,6 +168,8 @@ class ModelGenerator:
 
         ink_tmp = Ink(pts, text=req.text)
         for sl in ink_tmp.stroke_slices():
+            if sl.stop > n_mod:
+                break
             m_xy = mod_pts[sl, :2]
             b_xy = pts[sl, :2]
             if len(b_xy) < 2:
