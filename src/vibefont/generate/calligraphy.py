@@ -274,14 +274,41 @@ def _strokes_to_calligraphy_ink(
             is_tail_stroke=is_tail,
             has_ko=has_ko,
         )
+
+        # 1. Neuromotor inflection curvature & corner hesitation (전절/기필 머무름)
+        dxy = np.gradient(dense, axis=0)
+        ds = np.maximum(np.linalg.norm(dxy, axis=1), 1e-4)
+        tangent = dxy / ds[:, None]
+        angles = np.arctan2(tangent[:, 1], tangent[:, 0])
+        d_ang = np.abs((np.gradient(angles) + np.pi) % (2 * np.pi) - np.pi)
+        curv = d_ang / ds
+
+        # Deceleration at high curvature and momentary dwell pause at corners
+        corner_slowdown = 1.0 / (1.0 + 2.5 * np.clip(curv / 0.8, 0.0, 4.0))
+        corner_dwell = 0.045 * np.clip((curv - 0.4) / 1.2, 0.0, 1.0)
+
+        # 2. Ballistic downstroke acceleration
+        down_bias = np.clip(dxy[:, 1] / ds, -1.0, 1.0)
+        cum_s = np.cumsum(ds)
+        ballistic_boost = np.clip(down_bias, 0.0, 1.0) * np.clip(cum_s / 5.0, 0.0, 1.0)
+
         d = np.linalg.norm(np.diff(dense, axis=0), axis=1)
-        v_mm_s = np.clip(55.0 * (1.25 - 0.75 * p[:-1]), 14.0, 95.0)
-        dt = np.maximum(d / v_mm_s, 1e-3)
+        v_base = 56.0 * (1.25 - 0.70 * p[:-1])
+        v_mm_s = np.clip(v_base * (1.0 + 1.85 * ballistic_boost[:-1]) * corner_slowdown[:-1], 6.0, 160.0)
+        dt = np.maximum(d / v_mm_s, 1e-4) + corner_dwell[:-1]
         ts = np.concatenate([[0.0], np.cumsum(dt)])
 
-        r = np.zeros((len(dense), NCOLS), dtype=np.float32)
-        r[:, X] = dense[:, 0]
-        r[:, Y] = dense[:, 1]
+        # 3. 10Hz involuntary physiological micro-tremor along extended strokes
+        n_pts = len(dense)
+        n_vec = np.stack([-tangent[:, 1], tangent[:, 0]], axis=1)
+        phase = 2.0 * np.pi * 10.0 * ts
+        tremor_fade = np.clip(np.minimum(np.arange(n_pts), n_pts - 1 - np.arange(n_pts)) / 4.0, 0.0, 1.0)
+        tremor_amp = 0.013 * (1.0 - 0.45 * np.clip(p, 0.0, 1.0)) * tremor_fade
+        dense_out = dense + (tremor_amp * np.sin(phase))[:, None] * n_vec
+
+        r = np.zeros((len(dense_out), NCOLS), dtype=np.float32)
+        r[:, X] = dense_out[:, 0]
+        r[:, Y] = dense_out[:, 1]
         r[:, T] = t + ts
         r[:, P] = p
         r[:, EOS] = 0.0
