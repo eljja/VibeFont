@@ -307,45 +307,77 @@ def compose_calligraphy_page(
 
     has_ko = any(is_hangul(c) for c in text)
     raw_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not raw_lines:
+        return page
+
     proc = ProceduralGenerator()
     script_font = proc.fonts["fancy"]
     profile = sample_writer_profile(rng, spec.style)
 
-    line_inks: list[Ink] = []
-    base_size_mm = 4.85 if has_ko else 3.25
-    line_pitch = 16.2 if has_ko else 13.2
+    # 1. Semantic Emotion & Morphology Analysis
+    semantic_lines = analyze_semantics(text)
+    while len(semantic_lines) < len(raw_lines):
+        semantic_lines.append([])
+
+    # Compute line-level hierarchy across the entire piece
+    line_scores: list[float] = []
+    for m_list in semantic_lines:
+        if not m_list:
+            line_scores.append(1.0)
+            continue
+        sc = max(
+            (0.15 if m.is_particle else (4.5 if m.archetype != SemanticArchetype.NEUTRAL else 1.0) * (1.35 if m.is_hero else 1.0))
+            for m in m_list
+        )
+        line_scores.append(sc)
+
+    max_sc = max(line_scores) if line_scores else 1.0
+    min_sc = min(line_scores) if line_scores else 1.0
+
+    line_scale_factors: list[float] = []
+    for sc in line_scores:
+        if len(raw_lines) <= 1:
+            fac = 1.0
+        elif max_sc > min_sc:
+            t = (sc - min_sc) / (max_sc - min_sc)
+            fac = 0.86 + 0.46 * t
+        else:
+            fac = 1.0
+        line_scale_factors.append(fac)
+
+    base_size_mm = 4.55 if has_ko else 3.20
+    line_pitch = 17.0 if has_ko else 13.5
+
+    # 2. Build normalized strokes for each line
+    all_line_strokes_norm: list[list[tuple[np.ndarray, float, bool]]] = []
 
     for line_idx, line_str in enumerate(raw_lines):
         words = line_str.split()
+        m_list = semantic_lines[line_idx]
+        line_fac = line_scale_factors[line_idx]
         line_strokes_norm: list[tuple[np.ndarray, float, bool]] = []
         cursor_x = 0.0
 
-        # Identify the primary hero word in this line (longest content word)
-        content_lengths = []
-        for w in words:
-            if has_ko:
-                st_part, _ = _split_ko_stem_particle(w)
-                content_lengths.append(len(st_part))
-            else:
-                cl = w.strip(".,!?;:").lower()
-                content_lengths.append(0 if cl in _EN_FUNCTION_WORDS else len(cl))
-        hero_word_idx = int(np.argmax(content_lengths)) if content_lengths else 0
-
-        for w_idx, word in enumerate(words):
-            is_line_hero = w_idx == hero_word_idx
-            if has_ko:
+        if has_ko:
+            for w_idx, word in enumerate(words):
                 stem, particle = _split_ko_stem_particle(word)
-                # Render stem syllables (bold, large, expressive, with clean breathing room)
+                m_stem = next((m for m in m_list if m.word == stem and not m.is_particle), None)
+                m_part = next((m for m in m_list if m.is_particle and (m.word == particle or particle.startswith(m.word))), None)
+                is_hero_stem = (m_stem.is_hero if m_stem else False) or (line_fac > 1.15 and w_idx == 0)
+
+                # Render stem syllables (dominant, sculpted, expressive)
+                stem_sc = (m_stem.scale if m_stem else (1.42 if is_hero_stem else 1.12)) * line_fac
                 for c_i, ch in enumerate(stem):
                     is_end = (c_i == len(stem) - 1) and not particle
-                    sc = (1.26 if is_line_hero else 1.08) * float(rng.uniform(0.95, 1.06))
-                    # Dancing calligraphic baseline rhythm (지그재그 높낮이)
-                    dy = float(rng.uniform(-0.14, 0.14)) + (-0.10 if c_i % 2 == 1 else 0.05)
-                    rot = np.radians(float(rng.uniform(-3.2, 2.5)))
+                    sc = stem_sc * float(rng.uniform(0.97, 1.03))
+                    dy = float(rng.uniform(-0.12, 0.12)) + (-0.08 if c_i % 2 == 1 else 0.04)
+                    rot = np.radians(float(rng.uniform(-3.0, 2.5)))
                     c_rot, s_rot = np.cos(rot), np.sin(rot)
-                    sculpted = _sculpt_ko_syllable_strokes(ch, rng, is_hero=is_line_hero, is_word_end=is_end, profile=profile)
+                    sculpted = _sculpt_ko_syllable_strokes(
+                        ch, rng, is_hero=is_hero_stem, is_word_end=is_end, profile=profile, morph=m_stem
+                    )
                     if not sculpted:
-                        cursor_x += 1.0
+                        cursor_x += 0.9 * sc
                         continue
                     all_p = np.concatenate([p for p, _, _ in sculpted], axis=0)
                     x0 = float(all_p[:, 0].min())
@@ -356,57 +388,62 @@ def compose_calligraphy_page(
                         rx = c_rot * px - s_rot * py + cursor_x
                         ry = s_rot * px + c_rot * py
                         line_strokes_norm.append((np.stack([rx, ry], axis=1), s_weight, is_tail))
-                    # Clean positive syllable kerning so brush strokes never collide into blobs
-                    cursor_x += (ch_w * sc) + 0.34 * sc
+                    cursor_x += (ch_w * sc) + 0.26 * sc
 
-                # Render trailing grammatical particle smaller & tucked beside the stem
-                for c_i, ch in enumerate(particle):
-                    sc = 0.82 * float(rng.uniform(0.95, 1.05))
-                    dy = float(rng.uniform(-0.04, 0.12))
-                    sculpted = _sculpt_ko_syllable_strokes(ch, rng, is_hero=False, is_word_end=(c_i == len(particle) - 1), profile=profile)
-                    if not sculpted:
-                        cursor_x += 0.55
-                        continue
-                    all_p = np.concatenate([p for p, _, _ in sculpted], axis=0)
-                    x0 = float(all_p[:, 0].min())
-                    ch_w = float(all_p[:, 0].max() - x0)
-                    for pts, s_weight, is_tail in sculpted:
-                        px = (pts[:, 0] - x0) * sc + cursor_x
-                        py = pts[:, 1] * sc + dy
-                        line_strokes_norm.append((np.stack([px, py], axis=1), s_weight, is_tail))
-                    cursor_x += (ch_w * sc) + 0.28 * sc
+                # Render trailing grammatical particle smaller & tucked tightly beside stem
+                if particle:
+                    part_sc = (m_part.scale if m_part else 0.72) * line_fac
+                    for c_i, ch in enumerate(particle):
+                        sc = part_sc * float(rng.uniform(0.96, 1.04))
+                        dy = float(rng.uniform(-0.04, 0.10))
+                        sculpted = _sculpt_ko_syllable_strokes(
+                            ch, rng, is_hero=False, is_word_end=(c_i == len(particle) - 1), profile=profile, morph=m_part
+                        )
+                        if not sculpted:
+                            cursor_x += 0.5 * sc
+                            continue
+                        all_p = np.concatenate([p for p, _, _ in sculpted], axis=0)
+                        x0 = float(all_p[:, 0].min())
+                        ch_w = float(all_p[:, 0].max() - x0)
+                        for pts, s_weight, is_tail in sculpted:
+                            px = (pts[:, 0] - x0) * sc + cursor_x
+                            py = pts[:, 1] * sc + dy
+                            line_strokes_norm.append((np.stack([rx, ry], axis=1), s_weight, is_tail))
+                        cursor_x += (ch_w * sc) + 0.18 * sc
 
-                cursor_x += 0.92  # Inter-word breathing room
-            else:
+                cursor_x += 0.85 * line_fac
+        else:
+            for w_idx, word in enumerate(words):
                 clean_w = word.strip(".,!?;:").lower()
-                is_func = clean_w in _EN_FUNCTION_WORDS and not is_line_hero
-                sc = 0.86 if is_func else (1.22 if is_line_hero else 1.05)
-                s_weight = 0.78 if is_func else (1.02 if is_line_hero else 0.92)
-                w_strokes, w_width = script_font.word(word, rng=rng, connectedness=0.92, neatness=0.88, profile=profile)
+                m_word = next((m for m in m_list if m.word.lower() == clean_w), None)
+                is_hero_w = (m_word.is_hero if m_word else False) or (clean_w not in _EN_FUNCTION_WORDS and line_fac > 1.15)
+                is_func = (clean_w in _EN_FUNCTION_WORDS) and not is_hero_w
+
+                sc = ((0.76 if is_func else (1.38 if is_hero_w else 1.05))) * line_fac
+                s_weight = 0.76 if is_func else (1.05 if is_hero_w else 0.92)
+                w_strokes, _ = script_font.word(word, rng=rng, connectedness=0.92, neatness=0.88, profile=profile)
                 if not w_strokes:
-                    cursor_x += 0.8
+                    cursor_x += 0.8 * sc
                     continue
-                # Apply authentic Copperplate 16-deg slant and graceful baseline
                 slant_k = np.tan(np.radians(16.0))
-                word_dy = float(rng.uniform(-0.06, 0.06))
+                word_dy = float(rng.uniform(-0.05, 0.05))
                 placed_w: list[np.ndarray] = []
                 for s_i, s in enumerate(w_strokes):
                     px = s[:, 0] * sc
                     py = s[:, 1] * sc + word_dy
                     px = px - slant_k * py + cursor_x
                     pts = np.stack([px, py], axis=1)
-                    # Add entry swash on line-initial capital or exit flourish on line-final word
                     if w_idx == 0 and s_i == 0 and len(pts) >= 3:
                         p0 = pts[0]
                         swash = _curve(
-                            [[p0[0] - 0.72, p0[1] + 0.28], [p0[0] - 0.36, p0[1] - 0.22], p0.tolist()],
+                            [[p0[0] - 0.70 * sc, p0[1] + 0.26 * sc], [p0[0] - 0.35 * sc, p0[1] - 0.20 * sc], p0.tolist()],
                             n=14,
                         )
                         pts = np.concatenate([swash[:-1], pts], axis=0)
                     elif w_idx == len(words) - 1 and s_i == len(w_strokes) - 1 and len(pts) >= 3:
                         pe = pts[-1]
                         swash = _curve(
-                            [pe.tolist(), [pe[0] + 0.48, pe[1] + 0.18], [pe[0] + 0.95, pe[1] - 0.24]],
+                            [pe.tolist(), [pe[0] + 0.46 * sc, pe[1] + 0.16 * sc], [pe[0] + 0.90 * sc, pe[1] - 0.22 * sc]],
                             n=14,
                         )
                         pts = np.concatenate([pts, swash[1:]], axis=0)
@@ -415,25 +452,37 @@ def compose_calligraphy_page(
                     line_strokes_norm.append((pts, s_weight, is_tail))
 
                 all_wp = np.concatenate(placed_w, axis=0)
-                cursor_x = float(all_wp[:, 0].max()) + 0.72
+                cursor_x = float(all_wp[:, 0].max()) + 0.70 * sc
 
-        if not line_strokes_norm:
+        all_line_strokes_norm.append(line_strokes_norm)
+
+    # 3. Global layout scaling to fit card margins while preserving line hierarchy
+    max_line_w_raw = 1e-3
+    for lsn in all_line_strokes_norm:
+        if lsn:
+            all_pts = np.concatenate([p for p, _, _ in lsn], axis=0)
+            w_raw = float(all_pts[:, 0].max() - all_pts[:, 0].min())
+            max_line_w_raw = max(max_line_w_raw, w_raw)
+
+    max_allowed_w_mm = w_mm - 28.0
+    global_scale = min(1.0, max_allowed_w_mm / (max_line_w_raw * base_size_mm))
+    eff_size_mm = base_size_mm * global_scale
+    eff_pitch_mm = line_pitch * min(1.0, (h_mm - 28.0) / max(len(raw_lines) * line_pitch, 1e-3))
+
+    line_inks: list[Ink] = []
+    for line_idx, (line_str, lsn) in enumerate(zip(raw_lines, all_line_strokes_norm)):
+        if not lsn:
             continue
-
-        # Convert normalized calligraphic line to millimetres and auto-fit to card margins
-        all_pts = np.concatenate([p for p, _, _ in line_strokes_norm], axis=0)
+        all_pts = np.concatenate([p for p, _, _ in lsn], axis=0)
         xmin, xmax = float(all_pts[:, 0].min()), float(all_pts[:, 0].max())
-        stagger_mm = (line_idx - 0.5 * (len(raw_lines) - 1)) * (3.8 if has_ko else 0.0)
-        raw_lw_mm = (xmax - xmin) * base_size_mm
-        max_allowed_mm = w_mm - 26.0 - 2.0 * abs(stagger_mm)
-        eff_size_mm = base_size_mm * min(1.0, max_allowed_mm / max(raw_lw_mm, 1e-3))
         lw_mm = (xmax - xmin) * eff_size_mm
-
+        stagger_mm = (line_idx - 0.5 * (len(raw_lines) - 1)) * (3.6 if has_ko else 0.0)
         x_offset_mm = 0.5 * (w_mm - lw_mm) + stagger_mm
-        y_base_mm = 0.5 * h_mm + (line_idx - 0.5 * (len(raw_lines) - 1)) * line_pitch
+        x_offset_mm = float(np.clip(x_offset_mm, 8.0, w_mm - lw_mm - 8.0))
+        y_base_mm = 0.5 * h_mm + (line_idx - 0.5 * (len(raw_lines) - 1)) * eff_pitch_mm
 
         mm_strokes: list[tuple[np.ndarray, float, bool]] = []
-        for pts, s_weight, is_tail in line_strokes_norm:
+        for pts, s_weight, is_tail in lsn:
             xy_mm = np.stack(
                 [
                     (pts[:, 0] - xmin) * eff_size_mm + x_offset_mm,
@@ -447,7 +496,7 @@ def compose_calligraphy_page(
 
     page.lines = line_inks
 
-    # Center entire composition vertically on the card
+    # 4. Center composition vertically and place seal / accents in optical void
     non_empty = [ln for ln in page.lines if len(ln)]
     if non_empty:
         ymin = min(ln.bbox()[1] for ln in non_empty)
@@ -458,15 +507,33 @@ def compose_calligraphy_page(
         page.lines = [ln.translate(0.0, dy) for ln in page.lines]
         ymin += dy
         ymax += dy
+        last_ln = page.lines[-1]
+        last_bbox = last_ln.bbox()
 
         if has_ko:
-            # Place traditional vermilion carved stone seal (전각 낙관 인장) beside lower-right of calligraphy
             seal_size = 8.2
-            sx0 = min(w_mm - 16.0, xmax + 4.5)
-            sy0 = min(h_mm - 15.0, ymax - seal_size + 1.5)
+            all_pts_list = [ln.xy for ln in page.lines if len(ln)]
+            page_all_pts = np.concatenate(all_pts_list, axis=0)
+
+            candidates = [
+                (min(w_mm - seal_size - 6.0, last_bbox[2] + 4.0), max(6.0, last_bbox[3] - seal_size)),
+                (min(w_mm - seal_size - 8.0, xmax + 4.5), min(h_mm - seal_size - 8.0, ymax - seal_size + 1.0)),
+                (min(w_mm - seal_size - 8.0, last_bbox[2] - seal_size), min(h_mm - seal_size - 8.0, last_bbox[3] + 4.0)),
+                (w_mm - seal_size - 10.0, h_mm - seal_size - 10.0),
+            ]
+            best_cand = candidates[0]
+            best_dist = -1.0
+            for sx, sy in candidates:
+                cx, cy = sx + 0.5 * seal_size, sy + 0.5 * seal_size
+                dists = np.hypot(page_all_pts[:, 0] - cx, page_all_pts[:, 1] - cy)
+                d_min = float(np.min(dists))
+                if d_min > best_dist:
+                    best_dist = d_min
+                    best_cand = (sx, sy)
+
+            sx0, sy0 = best_cand
             page.seal_box_mm = (sx0, sy0, sx0 + seal_size, sy0 + seal_size)
 
-            # Subtle watercolor / sumi-ink wash accents in negative space
             ink_r, ink_g, ink_b = spec.ink.color
             wash_col = (
                 min(0.95, 0.55 + 0.45 * ink_r),
@@ -478,11 +545,11 @@ def compose_calligraphy_page(
                 {"x_mm": max(14.0, xmin + 2.5), "y_mm": ymin - 2.0, "rx_mm": 4.2, "ry_mm": 3.6, "color": wash_col, "opacity": 0.09},
             ]
         else:
-            # Add balanced Copperplate off-hand flourish beneath the English stanza
+            fl_y = min(h_mm - 12.0, ymax + 6.5)
             fl_strokes = _build_offhand_flourish(
                 cx_mm=0.5 * w_mm,
-                y_mm=min(h_mm - 11.0, ymax + 7.5),
-                span_w_mm=min(85.0, (xmax - xmin) * 0.72),
+                y_mm=fl_y,
+                span_w_mm=min(80.0, (xmax - xmin) * 0.72),
             )
             page.lines.append(_strokes_to_calligraphy_ink(fl_strokes, text="", has_ko=False))
 
