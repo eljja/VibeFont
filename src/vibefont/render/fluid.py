@@ -74,3 +74,27 @@ def feather_anisotropic(
         curr_D = curr_D + (1.20 / iters) * spread
 
     return curr_D
+
+
+def wet_overlap_bleed(
+    D_old: np.ndarray,
+    B_new: np.ndarray,
+    age_s: np.ndarray,
+    window_s: float = 1.5,
+    gain: float = 0.35,
+    sigma_px: float = 1.4,
+) -> np.ndarray:
+    """Computes capillary bleed when a wet stroke crosses freshly deposited wet ink.
+
+    Liquid inks bleed together when wet (age < window_s), creating darker, softly diffused
+    intersections. Once the prior stroke is dry (age >= window_s), fresh ink simply stacks
+    without bleeding.
+    """
+    if window_s <= 0 or gain <= 0:
+        return np.zeros_like(B_new)
+    wet_factor = np.clip(1.0 - age_s / window_s, 0.0, 1.0)
+    overlap = np.minimum(D_old, B_new) * wet_factor
+    if not np.any(overlap > 1e-4):
+        return np.zeros_like(B_new)
+    bleed = gain * gaussian_filter(overlap, sigma_px)
+    return bleed.astype(np.float32)

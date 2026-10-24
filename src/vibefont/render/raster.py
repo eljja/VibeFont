@@ -17,10 +17,11 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter
 
 from ..document.layout import Page
+from ..ink import T
 from ..vibe.spec import VibeSpec
 from .paper import make_paper
 from .pens import pen_samples
-from .fluid import feather_anisotropic, fibre_field
+from .fluid import feather_anisotropic, fibre_field, wet_overlap_bleed
 
 _CHUNK = 6000
 
@@ -55,10 +56,13 @@ def stamp_stroke(
     dens: np.ndarray,
     dryness: np.ndarray | None = None,
     dry_streak: float = 0.0,
-) -> None:
-    """Add one stroke (pixel coords, radius px, density) into density buffer D in place."""
+) -> tuple[int, int, np.ndarray] | None:
+    """Add one stroke (pixel coords, radius px, density) into density buffer D in place.
+
+    Returns (y0, x0, B) of the stamped stroke's bounding box and buffer, or None if empty.
+    """
     if len(xy) == 0:
-        return
+        return None
     dry = np.zeros(len(xy), dtype=np.float64) if dryness is None else np.asarray(dryness, dtype=np.float64)
     step = 0.26 * float(np.median(r)) if len(r) else 0.45
     xy, r, dens, dry = _resample_stroke(xy, r, dens, dry, step)
@@ -69,7 +73,7 @@ def stamp_stroke(
     x1 = min(int(np.ceil(xy[:, 0].max())) + R + 1, W)
     y1 = min(int(np.ceil(xy[:, 1].max())) + R + 1, H)
     if x1 <= x0 or y1 <= y0:
-        return
+        return None
 
     # Unit normal across stroke for transverse bristle / ballpoint track physics
     if len(xy) >= 2:
@@ -103,6 +107,7 @@ def stamp_stroke(
         m = (cov > 0) & (ix >= x0) & (ix < x1) & (iy >= y0) & (iy < y1)
         np.maximum.at(B, (iy[m] - y0, ix[m] - x0), cov[m])
     D[y0:y1, x0:x1] += B
+    return y0, x0, B
 
 
 def _render_seal_stamp(
@@ -196,6 +201,9 @@ def render_page(page: Page, spec: VibeSpec, dpi: int = 300, rng: np.random.Gener
         _render_wash_accents(rgb, tooth, page.wash_accents, px)
 
     D = np.zeros(tooth.shape, np.float32)
+    LIQUID_PENS = {"fountain", "gel", "marker", "brush", "broad_nib"}
+    is_liquid = spec.pen.type in LIQUID_PENS
+    Tm = np.full(tooth.shape, -1e9, dtype=np.float32) if is_liquid else None
     grain, feather, rim_halo, porous_threshold = 0.15, 0.0, 0.0, 0.0
     for ink in page.lines:
         if len(ink) == 0:
@@ -208,7 +216,20 @@ def render_page(page: Page, spec: VibeSpec, dpi: int = 300, rng: np.random.Gener
         rad = np.maximum(ps.width_mm * px / 2.0, min_rad)
         for sl in ink.stroke_slices():
             sl_dry = ps.dryness[sl] if ps.dryness is not None else None
-            stamp_stroke(D, xy[sl], rad[sl], ps.dens[sl], dryness=sl_dry, dry_streak=ps.dry_streak)
+            res = stamp_stroke(D, xy[sl], rad[sl], ps.dens[sl], dryness=sl_dry, dry_streak=ps.dry_streak)
+            if res is not None and is_liquid and Tm is not None:
+                y0, x0, B = res
+                y1 = y0 + B.shape[0]
+                x1 = x0 + B.shape[1]
+                t_stroke = float(np.mean(ink.points[sl, T]))
+                D_old = np.maximum(D[y0:y1, x0:x1] - B, 0.0)
+                age = np.maximum(t_stroke - Tm[y0:y1, x0:x1], 0.0)
+                bleed = wet_overlap_bleed(D_old, B, age, window_s=1.5, gain=0.35)
+                D[y0:y1, x0:x1] += bleed
+                mask = B > 0.05
+                Tm_sub = Tm[y0:y1, x0:x1]
+                Tm_sub[mask] = t_stroke
+                Tm[y0:y1, x0:x1] = Tm_sub
 
     # 1. Porous dry-media interaction (pencil graphite catching only on paper tooth peaks)
     if porous_threshold > 0.01:

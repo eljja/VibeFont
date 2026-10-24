@@ -2,9 +2,11 @@ import numpy as np
 import pytest
 
 from vibefont.ink import Ink, X, Y, T, P, EOS
+from vibefont.document.layout import Page
 from vibefont.render.pens import pen_samples, _ballpoint_goop
-from vibefont.render.fluid import feather_anisotropic, fibre_field
-from vibefont.vibe.spec import PenSpec, StyleSpec
+from vibefont.render.fluid import feather_anisotropic, fibre_field, wet_overlap_bleed
+from vibefont.render.raster import render_page
+from vibefont.vibe.spec import PenSpec, StyleSpec, VibeSpec
 
 
 def ink_with_pause(pause_s: float) -> Ink:
@@ -170,3 +172,55 @@ def test_skip_has_ball_period():
     period = dominant_period_mm(s, ink)
     expected_period = np.pi * 0.7
     assert abs(period - expected_period) <= 0.40
+
+
+def render_cross(pen: str, dt: float):
+    xs = np.linspace(15.0, 35.0, 50)
+    pts1 = np.zeros((50, 5), dtype=np.float32)
+    pts1[:, X] = xs
+    pts1[:, Y] = 20.0
+    pts1[:, T] = np.linspace(0.0, 0.4, 50)
+    pts1[:, P] = 0.5
+    pts1[-1, EOS] = 1.0
+    ink1 = Ink(pts1)
+
+    ys = np.linspace(10.0, 30.0, 50)
+    pts2 = np.zeros((50, 5), dtype=np.float32)
+    pts2[:, X] = 25.0
+    pts2[:, Y] = ys
+    pts2[:, T] = np.linspace(dt, dt + 0.4, 50)
+    pts2[:, P] = 0.5
+    pts2[-1, EOS] = 1.0
+    ink2 = Ink(pts2)
+
+    page = Page(60, 40, lines=[ink1, ink2])
+    spec = VibeSpec(pen=PenSpec(type=pen))
+    return render_page(page, spec, dpi=300, rng=np.random.default_rng(0))
+
+
+def intersection_density(img) -> float:
+    arr = np.array(img, dtype=np.float32)
+    px = 300 / 25.4
+    cx, cy = int(round(25.0 * px)), int(round(20.0 * px))
+    patch = arr[cy - 2:cy + 3, cx - 2:cx + 3]
+    # Optical density (Beer-Lambert absorbance: -ln(I / 255))
+    intensity = np.maximum(patch.mean(), 1.0)
+    return float(-np.log(intensity / 255.0))
+
+
+def test_bleed_zero_outside_window():
+    D_old = np.ones((20, 20), dtype=np.float32)
+    B = np.ones((20, 20), dtype=np.float32)
+    assert wet_overlap_bleed(D_old, B, np.full((20, 20), 5.0)).sum() == 0
+
+
+def test_quick_crossing_is_darker_than_slow_crossing():
+    dark_quick = intersection_density(render_cross(pen="fountain", dt=0.3))
+    dark_slow = intersection_density(render_cross(pen="fountain", dt=3.0))
+    assert dark_quick >= 1.08 * dark_slow
+
+
+def test_ballpoint_has_no_wet_bleed():
+    assert intersection_density(render_cross(pen="ballpoint", dt=0.3)) == pytest.approx(
+        intersection_density(render_cross(pen="ballpoint", dt=3.0)), rel=0.02
+    )
