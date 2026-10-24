@@ -553,7 +553,7 @@ def build_html_gallery(manifest: list[dict], out_html: Path) -> None:
     for item in manifest:
         cat = item.get("category", "original")
         cat_name, badge_color = cat_labels.get(cat, ("Showcase", "#64748b"))
-        fname = Path(item["file"]).name
+        fname = f"{item['lang']}/{Path(item['file']).name}"
         lang_badge = "한국어 (KO)" if item["lang"] == "ko" else "English (EN)"
         r, g, b = [int(c * 255) for c in item["ink_rgb"]]
         cards_html.append(
@@ -874,7 +874,15 @@ def main() -> None:
             page0 = pages[0]
         img = render_page(page0, spec, dpi=200, rng=np.random.default_rng(spec.seed + 1000))
 
-        out_path = out_dir / f"{item['id']}.png"
+        lang = "ko" if item["id"].startswith("ko_") else "en"
+        lang_dir = out_dir / lang
+        lang_dir.mkdir(parents=True, exist_ok=True)
+        # Clean up any legacy flat file in out_dir root
+        legacy_flat = out_dir / f"{item['id']}.png"
+        if legacy_flat.exists():
+            legacy_flat.unlink()
+
+        out_path = lang_dir / f"{item['id']}.png"
         save_images([img], out_path, dpi=200)
 
         entry = {
@@ -882,7 +890,7 @@ def main() -> None:
             "id": item["id"],
             "category": cat,
             "title": item["title"],
-            "lang": "ko" if item["id"].startswith("ko_") else "en",
+            "lang": lang,
             "char_count": char_len,
             "vibe": item["vibe"],
             "text": item["text"],
@@ -897,15 +905,35 @@ def main() -> None:
         else:
             new_entries.append(entry)
         print(
-            f"[{i:02d}/60] {out_path.name} ({char_len} chars, {cat}) | pen={spec.pen.type} paper={spec.paper.type}",
+            f"[{i:02d}/60] {lang}/{out_path.name} ({char_len} chars, {cat}) | pen={spec.pen.type} paper={spec.paper.type}",
             flush=True,
         )
 
     all_60 = original_entries + new_entries
     manifest_path.write_text(json.dumps(all_60, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # Build category contact sheets + master 60-image board
+    # Build category contact sheets + language-separated boards + master 60-image board
     print("Building visual comparison contact sheets & HTML gallery...", flush=True)
+    ko_entries = [e for e in all_60 if e["lang"] == "ko"]
+    en_entries = [e for e in all_60 if e["lang"] == "en"]
+    build_contact_sheet(
+        ko_entries,
+        out_dir / "ko" / "gallery_ko_all_30.png",
+        "VibeFont Korean Handwriting Showcase 30 Works (한글 손글씨 30선 전체 보드)",
+        "Original 10 | Master Cursive 5 | Kid Scrawl 5 | Calligraphy Cards 10",
+        cols=5,
+        thumb_w=320,
+        thumb_h=360,
+    )
+    build_contact_sheet(
+        en_entries,
+        out_dir / "en" / "gallery_en_all_30.png",
+        "VibeFont English Handwriting Showcase 30 Works (영문 손글씨 30선 전체 보드)",
+        "Original 10 | Master Cursive 5 | Kid Scrawl 5 | Calligraphy Cards 10",
+        cols=5,
+        thumb_w=320,
+        thumb_h=360,
+    )
     build_contact_sheet(
         original_entries,
         out_dir / "gallery_01_previous_20.png",

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from scipy.ndimage import gaussian_filter1d
 
 from ..descriptors import DESCRIPTOR_NAMES
 from ..document.drift import LineState
@@ -103,7 +104,7 @@ class ModelGenerator:
 
         # Style latent vector z: stochastic writer variation scaled by (1 - neatness)
         z_dim = self.model.c.style_dim
-        z_noise = req.rng.normal(0.0, 0.25 * (1.15 - req.state.neatness), size=(1, z_dim)).astype(np.float32)
+        z_noise = req.rng.normal(0.0, 0.45 * (1.25 - req.state.neatness), size=(1, z_dim)).astype(np.float32)
         z = torch.from_numpy(z_noise).to(self.device)
 
         # Context from previous line if available
@@ -119,7 +120,7 @@ class ModelGenerator:
         seed = int(req.rng.integers(0, 2**31 - 1))
         torch_gen = torch.Generator(device=self.device).manual_seed(seed)
 
-        sigma_bins = 1.15 + 0.45 * (1.0 - req.state.neatness)
+        sigma_bins = 3.8 + 2.2 * (1.0 - req.state.neatness)
         chunk_size = 1500
         mod_chunks: list[np.ndarray] = []
         for start in range(0, len(base_stack), chunk_size):
@@ -131,7 +132,7 @@ class ModelGenerator:
                 desc=t_desc,
                 base_toks=t_chunk,
                 ctx=ctx_tensor,
-                temperature=req.state.temperature,
+                temperature=max(req.state.temperature, 0.92),
                 sigma_bins=sigma_bins,
                 generator=torch_gen,
             )
@@ -143,7 +144,7 @@ class ModelGenerator:
         mod_np = np.concatenate(mod_chunks, axis=0)
         mod_ink = self.tokenizer.decode(TokenSeq.from_stack(mod_np), text=req.text)
 
-        # Blend neural stroke deltas with structural stroke anchors so cumulative drift is zero
+        # Strong hybrid neural modulation: reshape stroke interior curvature, scale, and anchor placement
         n_pts = min(len(base_ink), len(mod_ink))
         pts = base_ink.points[:n_pts].copy()
         mod_pts = mod_ink.points[:n_pts]
@@ -151,26 +152,41 @@ class ModelGenerator:
         # Transfer neural velocity/timing profile
         pts[:, T] = mod_pts[:, T]
 
+        loose = max(0.35, 1.35 - req.state.neatness)
+        # Very low-frequency phrase/word rhythm wave (wavelength 18..45 x-heights) so all strokes
+        # inside a single character move rigidly together without internal CAPTCHA warping
+        n_waves = 3
+        w_freq = req.rng.uniform(0.14, 0.34, size=(2, n_waves)).astype(np.float32)
+        w_phase = req.rng.uniform(0.0, 2.0 * np.pi, size=(2, n_waves)).astype(np.float32)
+        w_amp_x = req.rng.uniform(0.058, 0.082, size=(n_waves,)).astype(np.float32) * req.rng.choice([-1.0, 1.0], size=(n_waves,)).astype(np.float32)
+        w_amp_y = req.rng.normal(0.0, 0.022 * loose, size=(n_waves,)).astype(np.float32)
+
         ink_tmp = Ink(pts, text=req.text)
         for sl in ink_tmp.stroke_slices():
             m_xy = mod_pts[sl, :2]
             b_xy = pts[sl, :2]
             if len(b_xy) < 2:
                 continue
-            # Brownian-bridge endpoint-pinned neural residual: preserves closed loops (ㅇ, o, a, e)
-            # while injecting the trained CoreModel's stroke curvature and rhythm in the interior
             rel_mod = m_xy - m_xy[0:1]
             rel_base = b_xy - b_xy[0:1]
             t_lin = np.linspace(0.0, 1.0, len(rel_mod), dtype=np.float32)[:, None]
+
             drift_corr = t_lin * (rel_mod[-1:] - rel_base[-1:])
             rel_mod_pinned = rel_mod - 0.90 * drift_corr
-            resid = np.clip(rel_mod_pinned - rel_base, -0.18, 0.18)
-            blended_rel = rel_base + 0.35 * resid
-            if len(blended_rel) >= 3:
-                blended_rel[1:-1] = (
-                    0.2 * blended_rel[:-2] + 0.6 * blended_rel[1:-1] + 0.2 * blended_rel[2:]
-                )
-            pts[sl, :2] = b_xy[0:1] + blended_rel
+
+            resid = np.clip(rel_mod_pinned - rel_base, -0.045, 0.045)
+            if len(resid) >= 4:
+                resid = gaussian_filter1d(resid, sigma=2.5, axis=0, mode="nearest")
+                resid = resid - resid[0:1] - t_lin * (resid[-1:] - resid[0:1])
+
+            blended_rel = rel_base + 0.25 * resid
+
+            # Coherent word/character-level pacing shift evaluated smoothly along x
+            x_center = float(np.mean(b_xy[:, 0]))
+            char_dx = float(np.sum(w_amp_x * np.sin(w_freq[0] * x_center + w_phase[0])))
+            char_dy = float(np.sum(w_amp_y * np.sin(w_freq[1] * x_center + w_phase[1])))
+            anchor_shift = np.array([[np.clip(char_dx, -0.14, 0.14), np.clip(char_dy, -0.045, 0.045)]], dtype=np.float32)
+            pts[sl, :2] = b_xy[0:1] + anchor_shift + blended_rel
 
         ink = ensure_pressure(Ink(pts, text=req.text))
         ink.meta["generator"] = self.name

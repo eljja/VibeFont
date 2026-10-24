@@ -16,7 +16,11 @@ Key design features:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
+
+from ..vibe.spec import StyleSpec
 
 CHOSEONG_NAMES = [
     "ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ", "ㅅ",
@@ -32,16 +36,125 @@ JUNGSEONG_VERTICAL = {0, 1, 2, 3, 4, 5, 6, 7, 20}  # ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ
 JUNGSEONG_HORIZONTAL = {8, 12, 13, 17, 18}         # ㅗ ㅛ ㅜ ㅠ ㅡ
 JUNGSEONG_COMPLEX = {9, 10, 11, 14, 15, 16, 19}    # ㅘ ㅙ ㅚ ㅝ ㅞ ㅟ ㅢ
 
+WRITER_ARCHETYPES = (
+    "standard",
+    "tall_slender",
+    "wide_round",
+    "bold_head",
+    "upward_flow",
+    "compact_loose",
+)
 
-def _curve(ctrl: list[list[float]] | np.ndarray, n: int = 12) -> np.ndarray:
-    """Evaluates a smooth B-spline / quadratic Bezier chain through control points."""
-    pts = np.asarray(ctrl, dtype=np.float64)
+
+@dataclass
+class WriterProfile:
+    """Encodes document-level personal handwriting archetype & structural habits."""
+
+    archetype: str = "standard"
+    w_scale: float = 1.0          # Overall syllable width ratio (tall_slender < 1 < wide_round)
+    h_scale: float = 1.0          # Overall syllable height ratio
+    cho_scale: float = 1.0        # Initial consonant (초성) relative size
+    jong_scale: float = 1.0       # Final consonant (받침) relative size
+    horiz_tilt: float = 0.04      # Personal upward/downward tilt of horizontal strokes
+    stem_bend: float = 0.0        # Personal bow of vertical stems (-: concave left, +: convex right)
+    loop_roundness: float = 1.0   # Aspect inflation of loops (ㅇ, ㅁ, ㅎ)
+    allograph_bias: float = 0.5   # Preference for cursive/simplified vs. multi-stroke allographs
+
+
+def sample_writer_profile(
+    rng: np.random.Generator | None = None,
+    style: StyleSpec | None = None,
+) -> WriterProfile:
+    """Samples a distinct personal handwriting archetype and continuous structural traits."""
+    if rng is None:
+        return WriterProfile()
+
+    arch = str(rng.choice(WRITER_ARCHETYPES))
+    conn = style.connectedness if style is not None else 0.5
+    rnd = style.roundness if style is not None else 0.5
+
+    if arch == "tall_slender":
+        w_sc = float(rng.uniform(0.75, 0.85))
+        h_sc = float(rng.uniform(1.04, 1.12))
+        cho_sc = float(rng.uniform(0.92, 1.04))
+        jong_sc = float(rng.uniform(0.86, 0.96))
+        h_tilt = float(rng.uniform(0.03, 0.10))
+        s_bend = float(rng.uniform(-0.04, 0.04))
+        loop_r = float(rng.uniform(0.82, 0.96))
+    elif arch == "wide_round":
+        w_sc = float(rng.uniform(1.14, 1.26))
+        h_sc = float(rng.uniform(0.93, 0.99))
+        cho_sc = float(rng.uniform(1.02, 1.12))
+        jong_sc = float(rng.uniform(1.02, 1.14))
+        h_tilt = float(rng.uniform(-0.02, 0.05))
+        s_bend = float(rng.uniform(0.01, 0.06))
+        loop_r = float(rng.uniform(1.10, 1.28))
+    elif arch == "bold_head":
+        w_sc = float(rng.uniform(0.95, 1.08))
+        h_sc = float(rng.uniform(0.96, 1.08))
+        cho_sc = float(rng.uniform(1.12, 1.24))
+        jong_sc = float(rng.uniform(0.76, 0.88))
+        h_tilt = float(rng.uniform(0.05, 0.13))
+        s_bend = float(rng.uniform(-0.03, 0.05))
+        loop_r = float(rng.uniform(0.95, 1.15))
+    elif arch == "upward_flow":
+        w_sc = float(rng.uniform(0.92, 1.06))
+        h_sc = float(rng.uniform(0.95, 1.08))
+        cho_sc = float(rng.uniform(0.96, 1.10))
+        jong_sc = float(rng.uniform(0.85, 1.02))
+        h_tilt = float(rng.uniform(0.09, 0.17))
+        s_bend = float(rng.uniform(0.02, 0.08))
+        loop_r = float(rng.uniform(0.90, 1.12))
+    elif arch == "compact_loose":
+        w_sc = float(rng.uniform(0.88, 1.02))
+        h_sc = float(rng.uniform(0.88, 0.98))
+        cho_sc = float(rng.uniform(0.84, 0.94))
+        jong_sc = float(rng.uniform(0.82, 0.94))
+        h_tilt = float(rng.uniform(-0.03, 0.08))
+        s_bend = float(rng.uniform(-0.05, 0.05))
+        loop_r = float(rng.uniform(0.88, 1.08))
+    else:  # standard
+        w_sc = float(rng.uniform(0.94, 1.06))
+        h_sc = float(rng.uniform(0.95, 1.05))
+        cho_sc = float(rng.uniform(0.95, 1.06))
+        jong_sc = float(rng.uniform(0.92, 1.05))
+        h_tilt = float(rng.uniform(0.01, 0.08))
+        s_bend = float(rng.uniform(-0.03, 0.03))
+        loop_r = float(rng.uniform(0.94, 1.08))
+
+    # Blend with explicit style roundness / connectedness
+    loop_r *= 0.88 + 0.24 * rnd
+    allo_bias = float(np.clip(0.5 * conn + float(rng.uniform(0.0, 0.5)), 0.0, 1.0))
+    return WriterProfile(
+        archetype=arch,
+        w_scale=w_sc,
+        h_scale=h_sc,
+        cho_scale=cho_sc,
+        jong_scale=jong_sc,
+        horiz_tilt=h_tilt,
+        stem_bend=s_bend,
+        loop_roundness=loop_r,
+        allograph_bias=allo_bias,
+    )
+
+
+def _curve(
+    ctrl: list[list[float]] | np.ndarray,
+    n: int = 12,
+    rng: np.random.Generator | None = None,
+    jitter: float = 0.038,
+) -> np.ndarray:
+    """Evaluates a smooth B-spline / quadratic Bezier chain with optional control-point elasticity."""
+    pts = np.asarray(ctrl, dtype=np.float64).copy()
     m = len(pts)
+    if rng is not None and jitter > 0.0:
+        pts += rng.normal(0.0, jitter, size=pts.shape)
+
     if m == 2:
-        # Add a gentle mid-point bow for natural human stroke curvature
         mid = 0.5 * (pts[0] + pts[1])
         d = pts[1] - pts[0]
-        perp = np.array([-d[1], d[0]]) * 0.03
+        bow = 0.035 if rng is None else float(rng.normal(0.035, 0.045))
+        perp = np.array([-d[1], d[0]]) * bow
         pts = np.array([pts[0], mid + perp, pts[1]])
         m = 3
 
@@ -49,7 +162,6 @@ def _curve(ctrl: list[list[float]] | np.ndarray, n: int = 12) -> np.ndarray:
         t = np.linspace(0.0, 1.0, n)[:, None]
         return (1 - t) ** 2 * pts[0] + 2 * (1 - t) * t * pts[1] + t ** 2 * pts[2]
 
-    # For m >= 4: clamped uniform quadratic B-spline approximation (smooth corners)
     segments = []
     steps_per_seg = max(4, n // (m - 2))
     for i in range(m - 2):
@@ -57,7 +169,7 @@ def _curve(ctrl: list[list[float]] | np.ndarray, n: int = 12) -> np.ndarray:
         p1 = pts[i + 1]
         p2 = pts[i + 2] if i == m - 3 else 0.5 * (pts[i + 1] + pts[i + 2])
         t = np.linspace(0.0, 1.0, steps_per_seg, endpoint=(i == m - 3))[:, None]
-        seg = (1 - t) ** 2 * p0 + 2 * (1 - t) * t * p1 + t ** 2 * p2
+        seg = (1 - t) ** 2 * p0 + 2 * (1 - t) * t * pts[1] + t ** 2 * p2 if False else (1 - t) ** 2 * p0 + 2 * (1 - t) * t * p1 + t ** 2 * p2
         segments.append(seg)
     return np.concatenate(segments, axis=0)
 
@@ -69,18 +181,25 @@ def _ellipse_strokes(
     ry: float,
     n: int = 18,
     rng: np.random.Generator | None = None,
+    profile: WriterProfile | None = None,
 ) -> np.ndarray:
-    """Natural handwriting loop starting near 11 o'clock, sweeping CCW with slight overlap."""
-    start_ang = -0.55 * np.pi
-    span_ang = 2.07 * np.pi
+    """Natural handwriting loop with varied start angle, aspect ratio, and clean closure."""
+    start_ang = -0.50 * np.pi
+    span_ang = 2.04 * np.pi
+    skew = 0.02
+    if profile is not None:
+        rx *= float(np.clip(profile.loop_roundness, 0.88, 1.14))
     if rng is not None:
-        start_ang += float(rng.normal(0.0, 0.14))
-        span_ang += float(rng.normal(0.0, 0.12))
-        rx *= float(np.exp(rng.normal(0.0, 0.04)))
-        ry *= float(np.exp(rng.normal(0.0, 0.04)))
+        start_ang += float(rng.uniform(-0.22 * np.pi, 0.18 * np.pi))
+        span_ang = float(rng.uniform(1.95 * np.pi, 2.12 * np.pi))
+        rx *= float(np.clip(np.exp(rng.normal(0.0, 0.055)), 0.88, 1.14))
+        ry *= float(np.clip(np.exp(rng.normal(0.0, 0.055)), 0.88, 1.14))
+        cx += float(np.clip(rng.normal(0.0, 0.020), -0.04, 0.04))
+        cy += float(np.clip(rng.normal(0.0, 0.020), -0.04, 0.04))
+        skew = float(np.clip(rng.normal(0.02, 0.025), -0.03, 0.05))
     th = np.linspace(start_ang, start_ang + span_ang, n)
-    x = cx + rx * np.cos(th) + 0.03 * rx * np.sin(2 * th)
-    y = cy + ry * np.sin(th)
+    x = cx + rx * np.cos(th) + skew * rx * np.sin(2 * th)
+    y = cy + ry * np.sin(th) + 0.5 * skew * ry * np.cos(2 * th)
     return np.stack([x, y], axis=1)
 
 
@@ -88,227 +207,271 @@ def choseong_strokes(
     idx: int,
     rng: np.random.Generator | None = None,
     connectedness: float = 0.5,
+    profile: WriterProfile | None = None,
 ) -> list[np.ndarray]:
-    """Returns list of smooth curved (M, 2) strokes in normalized [0, 1] x [0, 1] box."""
-    if idx == 0:  # ㄱ: tilted horizontal -> rounded corner -> sweeping down-left stroke
-        return [_curve([[0.06, 0.16], [0.55, 0.10], [0.90, 0.10], [0.86, 0.55], [0.72, 0.94]], 14)]
+    """Returns list of smooth curved (M, 2) strokes in normalized [0, 1] x [0, 1] box with legible allographs."""
+    ht = float(np.clip(profile.horiz_tilt if profile is not None else 0.04, -0.02, 0.09))
+    roll = float(rng.random()) if rng is not None else 0.5
+    jit = 0.018 if rng is not None else 0.0
+
+    if idx == 0:  # ㄱ: 2 clean allographs (crisp corner vs gently arched downstroke)
+        if roll < 0.50:
+            return [_curve([[0.08, 0.16], [0.86, 0.12 - ht], [0.76, 0.90]], 14, rng, jit)]
+        return [_curve([[0.06, 0.18], [0.50, 0.12 - 0.5 * ht], [0.88, 0.12 - ht], [0.82, 0.54], [0.68, 0.92]], 15, rng, jit)]
     elif idx == 1:  # ㄲ
-        s1 = _curve([[0.04, 0.16], [0.44, 0.10], [0.42, 0.55], [0.34, 0.94]], 12)
-        s2 = _curve([[0.52, 0.16], [0.94, 0.10], [0.92, 0.55], [0.82, 0.94]], 12)
+        s1 = _curve([[0.04, 0.16], [0.44, 0.11 - ht], [0.42, 0.55], [0.35, 0.92]], 12, rng, jit)
+        s2 = _curve([[0.52, 0.16], [0.94, 0.11 - ht], [0.92, 0.55], [0.83, 0.92]], 12, rng, jit)
         return [s1, s2]
-    elif idx == 2:  # ㄴ: gentle vertical -> rounded bottom-left -> upward-tilted horizontal
-        return [_curve([[0.16, 0.08], [0.12, 0.58], [0.15, 0.90], [0.55, 0.92], [0.94, 0.85]], 14)]
-    elif idx == 3:  # ㄷ
+    elif idx == 2:  # ㄴ: 2 clean allographs (standard L vs softly scooped bottom)
+        if roll < 0.55:
+            return [_curve([[0.16, 0.08], [0.13, 0.56], [0.15, 0.88], [0.54, 0.90], [0.92, 0.85 - ht]], 14, rng, jit)]
+        return [_curve([[0.18, 0.08], [0.12, 0.78], [0.36, 0.91], [0.92, 0.83 - ht]], 14, rng, jit)]
+    elif idx == 3:  # ㄷ: always 2 strokes so it is never confused with ㄹ
         return [
-            _curve([[0.12, 0.16], [0.52, 0.11], [0.90, 0.09]], 10),
-            _curve([[0.16, 0.14], [0.12, 0.58], [0.15, 0.90], [0.55, 0.92], [0.94, 0.86]], 14),
+            _curve([[0.13, 0.15], [0.52, 0.11 - 0.5 * ht], [0.89, 0.09 - ht]], 10, rng, jit),
+            _curve([[0.16, 0.15], [0.13, 0.56], [0.15, 0.89], [0.54, 0.90], [0.92, 0.85 - ht]], 14, rng, jit),
         ]
     elif idx == 4:  # ㄸ
         return [
-            _curve([[0.05, 0.16], [0.44, 0.10]], 8),
-            _curve([[0.08, 0.14], [0.06, 0.88], [0.45, 0.86]], 12),
-            _curve([[0.54, 0.16], [0.94, 0.10]], 8),
-            _curve([[0.56, 0.14], [0.54, 0.88], [0.95, 0.86]], 12),
+            _curve([[0.05, 0.16], [0.44, 0.11 - ht]], 8, rng, jit),
+            _curve([[0.08, 0.15], [0.06, 0.88], [0.45, 0.86 - ht]], 12, rng, jit),
+            _curve([[0.54, 0.16], [0.94, 0.11 - ht]], 8, rng, jit),
+            _curve([[0.56, 0.15], [0.54, 0.88], [0.95, 0.86 - ht]], 12, rng, jit),
         ]
-    elif idx == 5:  # ㄹ: style-responsive allographs (3-stroke print, 2-stroke standard, 1-stroke ribbon)
-        if connectedness < 0.35:
+    elif idx == 5:  # ㄹ: 3-stroke print vs 2-stroke natural handwriting
+        if connectedness < 0.35 or (connectedness < 0.78 and roll < 0.45):
             return [
-                _curve([[0.08, 0.15], [0.88, 0.09], [0.85, 0.46]], 11),
-                _curve([[0.14, 0.49], [0.50, 0.47], [0.85, 0.45]], 9),
-                _curve([[0.14, 0.49], [0.12, 0.90], [0.55, 0.92], [0.94, 0.85]], 12),
-            ]
-        elif connectedness >= 0.68:
-            return [
-                _curve([[0.08, 0.15], [0.88, 0.09], [0.85, 0.45], [0.14, 0.49], [0.12, 0.90], [0.94, 0.85]], 20)
+                _curve([[0.08, 0.15], [0.87, 0.10 - ht], [0.85, 0.46]], 11, rng, jit),
+                _curve([[0.14, 0.48], [0.50, 0.46], [0.85, 0.45 - ht]], 9, rng, jit),
+                _curve([[0.14, 0.48], [0.12, 0.89], [0.54, 0.90], [0.93, 0.85 - ht]], 12, rng, jit),
             ]
         return [
-            _curve([[0.08, 0.15], [0.88, 0.09], [0.85, 0.46], [0.14, 0.48]], 14),
-            _curve([[0.14, 0.48], [0.12, 0.90], [0.55, 0.92], [0.94, 0.85]], 12),
+            _curve([[0.08, 0.15], [0.87, 0.10 - ht], [0.85, 0.46], [0.14, 0.48]], 14, rng, jit),
+            _curve([[0.14, 0.48], [0.12, 0.89], [0.54, 0.90], [0.93, 0.85 - ht]], 12, rng, jit),
         ]
-    elif idx == 6:  # ㅁ
+    elif idx == 6:  # ㅁ: 3-stroke crisp box vs 2-stroke box (never a circle)
+        if roll < 0.50:
+            return [
+                _curve([[0.14, 0.13], [0.13, 0.89]], 9, rng, jit),
+                _curve([[0.14, 0.14], [0.86, 0.11 - ht], [0.85, 0.88]], 12, rng, jit),
+                _curve([[0.14, 0.89], [0.86, 0.86 - ht]], 9, rng, jit),
+            ]
         return [
-            _curve([[0.14, 0.12], [0.12, 0.52], [0.16, 0.92]], 10),
-            _curve([[0.14, 0.14], [0.88, 0.10], [0.85, 0.88], [0.16, 0.90]], 16),
+            _curve([[0.14, 0.13], [0.13, 0.52], [0.15, 0.90]], 10, rng, jit),
+            _curve([[0.14, 0.14], [0.86, 0.11 - ht], [0.84, 0.88], [0.15, 0.89]], 15, rng, jit),
         ]
-    elif idx == 7:  # ㅂ
+    elif idx == 7:  # ㅂ: always clean 4-stroke or 3-stroke with clear vertical posts
         return [
-            _curve([[0.16, 0.08], [0.13, 0.52], [0.16, 0.92]], 10),
-            _curve([[0.84, 0.08], [0.86, 0.52], [0.82, 0.92]], 10),
-            _curve([[0.15, 0.52], [0.50, 0.49], [0.84, 0.47]], 8),
-            _curve([[0.16, 0.90], [0.50, 0.88], [0.83, 0.86]], 8),
+            _curve([[0.16, 0.08], [0.14, 0.52], [0.16, 0.90]], 10, rng, jit),
+            _curve([[0.84, 0.08], [0.85, 0.52], [0.82, 0.90]], 10, rng, jit),
+            _curve([[0.15, 0.50], [0.50, 0.48], [0.84, 0.46 - ht]], 8, rng, jit),
+            _curve([[0.16, 0.89], [0.50, 0.87], [0.83, 0.85 - ht]], 8, rng, jit),
         ]
     elif idx == 8:  # ㅃ
         return [
-            _curve([[0.06, 0.08], [0.06, 0.90], [0.44, 0.88], [0.44, 0.08]], 14),
-            _curve([[0.06, 0.50], [0.44, 0.47]], 8),
-            _curve([[0.54, 0.08], [0.54, 0.90], [0.92, 0.88], [0.92, 0.08]], 14),
-            _curve([[0.54, 0.50], [0.92, 0.47]], 8),
+            _curve([[0.06, 0.08], [0.06, 0.89], [0.44, 0.88], [0.44, 0.08]], 14, rng, jit),
+            _curve([[0.06, 0.50], [0.44, 0.48]], 8, rng, jit),
+            _curve([[0.54, 0.08], [0.54, 0.89], [0.92, 0.88], [0.92, 0.08]], 14, rng, jit),
+            _curve([[0.54, 0.50], [0.92, 0.48]], 8, rng, jit),
         ]
-    elif idx == 9:  # ㅅ
-        by = 0.44 + (float(rng.normal(0.0, 0.03)) if rng is not None else 0.0)
+    elif idx == 9:  # ㅅ: 2-stroke with varied branch point
+        by = 0.45 + (float(rng.uniform(-0.08, 0.08)) if rng is not None else 0.0)
         return [
-            _curve([[0.52, 0.08], [0.36, 0.52], [0.08, 0.92]], 10),
-            _curve([[0.38, by], [0.66, 0.68], [0.92, 0.90]], 10),
+            _curve([[0.52, 0.08], [0.36, 0.52], [0.08, 0.90]], 10, rng, jit),
+            _curve([[0.38, by], [0.66, 0.68], [0.92, 0.88]], 10, rng, jit),
         ]
     elif idx == 10:  # ㅆ
         return [
-            _curve([[0.28, 0.08], [0.18, 0.52], [0.04, 0.92]], 9),
-            _curve([[0.20, 0.45], [0.35, 0.68], [0.46, 0.90]], 9),
-            _curve([[0.76, 0.08], [0.66, 0.52], [0.52, 0.92]], 9),
-            _curve([[0.68, 0.45], [0.82, 0.68], [0.95, 0.90]], 9),
+            _curve([[0.28, 0.08], [0.18, 0.52], [0.04, 0.90]], 9, rng, jit),
+            _curve([[0.20, 0.45], [0.35, 0.68], [0.46, 0.88]], 9, rng, jit),
+            _curve([[0.76, 0.08], [0.66, 0.52], [0.52, 0.90]], 9, rng, jit),
+            _curve([[0.68, 0.45], [0.82, 0.68], [0.95, 0.88]], 9, rng, jit),
         ]
     elif idx == 11:  # ㅇ
-        return [_ellipse_strokes(0.50, 0.50, 0.39, 0.40, 18, rng=rng)]
-    elif idx == 12:  # ㅈ
+        return [_ellipse_strokes(0.50, 0.50, 0.38, 0.39, 18, rng=rng, profile=profile)]
+    elif idx == 12:  # ㅈ: 2-stroke standard vs 3-stroke print
+        if roll > 0.65:
+            return [
+                _curve([[0.10, 0.16], [0.88, 0.11 - ht]], 9, rng, jit),
+                _curve([[0.52, 0.14], [0.08, 0.90]], 9, rng, jit),
+                _curve([[0.42, 0.48], [0.92, 0.88]], 9, rng, jit),
+            ]
         return [
-            _curve([[0.10, 0.16], [0.52, 0.10], [0.88, 0.10], [0.48, 0.52], [0.08, 0.92]], 14),
-            _curve([[0.42, 0.48], [0.68, 0.70], [0.92, 0.90]], 10),
+            _curve([[0.10, 0.16], [0.52, 0.11 - ht], [0.88, 0.11 - ht], [0.48, 0.52], [0.08, 0.90]], 14, rng, jit),
+            _curve([[0.42, 0.48], [0.68, 0.70], [0.92, 0.88]], 10, rng, jit),
         ]
     elif idx == 13:  # ㅉ
         return [
-            _curve([[0.04, 0.16], [0.44, 0.10], [0.24, 0.52], [0.04, 0.92]], 12),
-            _curve([[0.22, 0.50], [0.46, 0.88]], 8),
-            _curve([[0.54, 0.16], [0.94, 0.10], [0.74, 0.52], [0.54, 0.92]], 12),
-            _curve([[0.72, 0.50], [0.96, 0.88]], 8),
+            _curve([[0.04, 0.16], [0.44, 0.11 - ht], [0.24, 0.52], [0.04, 0.90]], 12, rng, jit),
+            _curve([[0.22, 0.50], [0.46, 0.88]], 8, rng, jit),
+            _curve([[0.54, 0.16], [0.94, 0.11 - ht], [0.74, 0.52], [0.54, 0.90]], 12, rng, jit),
+            _curve([[0.72, 0.50], [0.96, 0.88]], 8, rng, jit),
         ]
-    elif idx == 14:  # ㅊ
+    elif idx == 14:  # ㅊ: vertical top tick vs horizontal top tick + ㅈ
+        if roll < 0.50:
+            return [
+                _curve([[0.50, 0.02], [0.50, 0.18]], 7, rng, jit),
+                _curve([[0.08, 0.26], [0.52, 0.21 - ht], [0.88, 0.21 - ht], [0.48, 0.58], [0.08, 0.92]], 14, rng, jit),
+                _curve([[0.42, 0.54], [0.68, 0.74], [0.92, 0.90]], 10, rng, jit),
+            ]
         return [
-            _curve([[0.38, 0.04], [0.52, 0.09], [0.64, 0.12]], 8),
-            _curve([[0.08, 0.26], [0.52, 0.20], [0.88, 0.20], [0.48, 0.58], [0.08, 0.94]], 14),
-            _curve([[0.42, 0.54], [0.68, 0.74], [0.92, 0.92]], 10),
+            _curve([[0.34, 0.06], [0.52, 0.08], [0.68, 0.10]], 8, rng, jit),
+            _curve([[0.08, 0.26], [0.52, 0.21 - ht], [0.88, 0.21 - ht], [0.48, 0.58], [0.08, 0.92]], 14, rng, jit),
+            _curve([[0.42, 0.54], [0.68, 0.74], [0.92, 0.90]], 10, rng, jit),
         ]
     elif idx == 15:  # ㅋ
         return [
-            _curve([[0.08, 0.16], [0.55, 0.10], [0.90, 0.10], [0.86, 0.55], [0.74, 0.94]], 14),
-            _curve([[0.12, 0.52], [0.50, 0.48], [0.84, 0.45]], 9),
+            _curve([[0.08, 0.16], [0.55, 0.11 - ht], [0.90, 0.11 - ht], [0.85, 0.55], [0.75, 0.92]], 14, rng, jit),
+            _curve([[0.12, 0.52], [0.50, 0.49], [0.84, 0.46 - ht]], 9, rng, jit),
         ]
-    elif idx == 16:  # ㅌ
+    elif idx == 16:  # ㅌ: always crisp 3-stroke
         return [
-            _curve([[0.14, 0.15], [0.52, 0.10], [0.88, 0.08]], 9),
-            _curve([[0.16, 0.50], [0.50, 0.47], [0.82, 0.45]], 9),
-            _curve([[0.16, 0.14], [0.12, 0.56], [0.15, 0.90], [0.55, 0.92], [0.92, 0.85]], 14),
+            _curve([[0.14, 0.15], [0.52, 0.11], [0.88, 0.09 - ht]], 9, rng, jit),
+            _curve([[0.16, 0.50], [0.50, 0.48], [0.82, 0.46 - ht]], 9, rng, jit),
+            _curve([[0.16, 0.14], [0.13, 0.56], [0.15, 0.89], [0.55, 0.90], [0.92, 0.85 - ht]], 14, rng, jit),
         ]
     elif idx == 17:  # ㅍ
         return [
-            _curve([[0.08, 0.15], [0.50, 0.10], [0.92, 0.08]], 9),
-            _curve([[0.32, 0.14], [0.30, 0.52], [0.28, 0.88]], 9),
-            _curve([[0.68, 0.12], [0.66, 0.50], [0.64, 0.86]], 9),
-            _curve([[0.06, 0.90], [0.50, 0.87], [0.94, 0.84]], 9),
+            _curve([[0.08, 0.15], [0.50, 0.11], [0.92, 0.09 - ht]], 9, rng, jit),
+            _curve([[0.32, 0.14], [0.30, 0.52], [0.29, 0.88]], 9, rng, jit),
+            _curve([[0.68, 0.12], [0.66, 0.50], [0.65, 0.86]], 9, rng, jit),
+            _curve([[0.06, 0.89], [0.50, 0.87], [0.94, 0.84 - ht]], 9, rng, jit),
         ]
-    elif idx == 18:  # ㅎ
+    elif idx == 18:  # ㅎ: 3 clean allographs (2-stroke connected top cap + circle, or 3-stroke vertical/slanted dot + bar + circle)
+        if roll < 0.36:
+            return [
+                _curve([[0.48, 0.02], [0.48, 0.19], [0.08, 0.24], [0.92, 0.19 - ht]], 12, rng, jit),
+                _ellipse_strokes(0.50, 0.64, 0.34, 0.28, 16, rng=rng, profile=profile),
+            ]
+        elif roll < 0.68:
+            return [
+                _curve([[0.50, 0.02], [0.49, 0.19]], 7, rng, jit),
+                _curve([[0.08, 0.25], [0.50, 0.21], [0.92, 0.18 - ht]], 9, rng, jit),
+                _ellipse_strokes(0.50, 0.64, 0.34, 0.28, 16, rng=rng, profile=profile),
+            ]
         return [
-            _curve([[0.36, 0.04], [0.50, 0.08], [0.64, 0.11]], 8),
-            _curve([[0.08, 0.25], [0.50, 0.20], [0.92, 0.18]], 9),
-            _ellipse_strokes(0.50, 0.64, 0.34, 0.29, 16, rng=rng),
+            _curve([[0.34, 0.05], [0.50, 0.08], [0.66, 0.10]], 8, rng, jit),
+            _curve([[0.08, 0.25], [0.50, 0.21], [0.92, 0.18 - ht]], 9, rng, jit),
+            _ellipse_strokes(0.50, 0.64, 0.34, 0.28, 16, rng=rng, profile=profile),
         ]
     return []
 
 
-def jungseong_strokes(idx: int, connectedness: float = 0.5) -> list[np.ndarray]:
-    """Returns list of smooth curved (M, 2) strokes in normalized [0, 1] x [0, 1] box."""
-    if connectedness >= 0.72:
-        v_main = lambda x: _curve([[x - 0.03, 0.05], [x + 0.01, 0.02], [x - 0.02, 0.54], [x, 0.97], [x - 0.05, 0.91]], 14)
-        h_main = lambda y: _curve([[0.02, y + 0.05], [0.28, y - 0.02], [0.68, y + 0.01], [0.97, y - 0.05]], 13)
-    else:
-        v_main = lambda x: _curve([[x, 0.02], [x - 0.02, 0.52], [x, 0.98]], 12)
-        h_main = lambda y: _curve([[0.04, y + 0.03], [0.50, y - 0.01], [0.96, y - 0.04]], 11)
+def jungseong_strokes(
+    idx: int,
+    connectedness: float = 0.5,
+    rng: np.random.Generator | None = None,
+    profile: WriterProfile | None = None,
+) -> list[np.ndarray]:
+    """Returns list of smooth curved (M, 2) strokes in normalized [0, 1] x [0, 1] box with clean legibility."""
+    ht = float(np.clip(profile.horiz_tilt if profile is not None else 0.04, -0.02, 0.08))
+    sb = float(np.clip(profile.stem_bend if profile is not None else 0.0, -0.035, 0.035))
+    jit = 0.015 if rng is not None else 0.0
+
+    def v_main(x: float) -> np.ndarray:
+        bend = sb + (float(rng.normal(0.0, 0.018)) if rng is not None else -0.01)
+        return _curve([[x, 0.02], [x + bend, 0.52], [x, 0.98]], 12, rng, jit)
+
+    def h_main(y: float) -> np.ndarray:
+        tilt = ht + (float(rng.normal(0.0, 0.018)) if rng is not None else 0.02)
+        return _curve([[0.04, y + 0.02], [0.50, y - 0.01], [0.96, y - tilt]], 11, rng, jit)
 
     if idx == 0:  # ㅏ
-        return [v_main(0.42), _curve([[0.42, 0.48], [0.70, 0.46], [0.94, 0.44]], 8)]
+        return [v_main(0.42), _curve([[0.42, 0.48], [0.68, 0.46], [0.94, 0.44 - ht]], 8, rng, jit)]
     elif idx == 1:  # ㅐ
-        return [v_main(0.32), _curve([[0.32, 0.48], [0.54, 0.46], [0.74, 0.45]], 8), v_main(0.76)]
+        return [v_main(0.32), _curve([[0.32, 0.48], [0.54, 0.46], [0.74, 0.45 - ht]], 8, rng, jit), v_main(0.76)]
     elif idx == 2:  # ㅑ
         return [
             v_main(0.42),
-            _curve([[0.42, 0.35], [0.68, 0.33], [0.94, 0.31]], 8),
-            _curve([[0.42, 0.62], [0.68, 0.60], [0.94, 0.58]], 8),
+            _curve([[0.42, 0.35], [0.68, 0.33], [0.94, 0.31 - ht]], 8, rng, jit),
+            _curve([[0.42, 0.62], [0.68, 0.60], [0.94, 0.58 - ht]], 8, rng, jit),
         ]
     elif idx == 3:  # ㅒ
         return [
             v_main(0.32),
-            _curve([[0.32, 0.35], [0.54, 0.33], [0.74, 0.32]], 8),
-            _curve([[0.32, 0.62], [0.54, 0.60], [0.74, 0.59]], 8),
+            _curve([[0.32, 0.35], [0.54, 0.33], [0.74, 0.32 - ht]], 8, rng, jit),
+            _curve([[0.32, 0.62], [0.54, 0.60], [0.74, 0.59 - ht]], 8, rng, jit),
             v_main(0.76),
         ]
     elif idx == 4:  # ㅓ
-        return [_curve([[0.06, 0.50], [0.34, 0.47], [0.60, 0.45]], 8), v_main(0.62)]
+        return [_curve([[0.06, 0.50], [0.34, 0.47], [0.60, 0.45 - ht]], 8, rng, jit), v_main(0.62)]
     elif idx == 5:  # ㅔ
-        return [_curve([[0.04, 0.50], [0.22, 0.48], [0.40, 0.46]], 8), v_main(0.42), v_main(0.80)]
+        return [_curve([[0.04, 0.50], [0.22, 0.48], [0.40, 0.46 - ht]], 8, rng, jit), v_main(0.42), v_main(0.80)]
     elif idx == 6:  # ㅕ
         return [
-            _curve([[0.06, 0.36], [0.34, 0.34], [0.60, 0.32]], 8),
-            _curve([[0.06, 0.62], [0.34, 0.60], [0.60, 0.58]], 8),
+            _curve([[0.06, 0.36], [0.34, 0.34], [0.60, 0.32 - ht]], 8, rng, jit),
+            _curve([[0.06, 0.62], [0.34, 0.60], [0.60, 0.58 - ht]], 8, rng, jit),
             v_main(0.62),
         ]
     elif idx == 7:  # ㅖ
         return [
-            _curve([[0.04, 0.36], [0.22, 0.34], [0.40, 0.33]], 8),
-            _curve([[0.04, 0.62], [0.22, 0.60], [0.40, 0.59]], 8),
+            _curve([[0.04, 0.36], [0.22, 0.34], [0.40, 0.33 - ht]], 8, rng, jit),
+            _curve([[0.04, 0.62], [0.22, 0.60], [0.40, 0.59 - ht]], 8, rng, jit),
             v_main(0.42),
             v_main(0.80),
         ]
     elif idx == 8:  # ㅗ
-        return [_curve([[0.50, 0.06], [0.49, 0.30], [0.50, 0.52]], 8), h_main(0.52)]
-    elif idx == 9:  # ㅘ (left ㅗ sits below choseong in y=[0.54..0.78], right ㅏ spans full y=[0.02..0.98])
+        return [_curve([[0.50, 0.14], [0.49, 0.42], [0.50, 0.68]], 8, rng, jit), h_main(0.68)]
+    elif idx == 9:  # ㅘ
         return [
-            _curve([[0.28, 0.54], [0.27, 0.66], [0.28, 0.78]], 8),
-            _curve([[0.02, 0.80], [0.30, 0.76], [0.58, 0.72]], 9),
+            _curve([[0.28, 0.50], [0.27, 0.64], [0.28, 0.78]], 8, rng, jit),
+            _curve([[0.02, 0.80], [0.30, 0.76], [0.58, 0.72 - ht]], 9, rng, jit),
             v_main(0.70),
-            _curve([[0.70, 0.48], [0.84, 0.46], [0.98, 0.44]], 8),
+            _curve([[0.70, 0.48], [0.84, 0.46], [0.98, 0.44 - ht]], 8, rng, jit),
         ]
     elif idx == 10:  # ㅙ
         return [
-            _curve([[0.24, 0.54], [0.23, 0.66], [0.24, 0.78]], 8),
-            _curve([[0.02, 0.80], [0.28, 0.76], [0.52, 0.72]], 9),
+            _curve([[0.24, 0.50], [0.23, 0.64], [0.24, 0.78]], 8, rng, jit),
+            _curve([[0.02, 0.80], [0.28, 0.76], [0.52, 0.72 - ht]], 9, rng, jit),
             v_main(0.62),
-            _curve([[0.62, 0.48], [0.76, 0.46], [0.88, 0.45]], 8),
+            _curve([[0.62, 0.48], [0.76, 0.46], [0.88, 0.45 - ht]], 8, rng, jit),
             v_main(0.90),
         ]
     elif idx == 11:  # ㅚ
         return [
-            _curve([[0.30, 0.54], [0.29, 0.66], [0.30, 0.78]], 8),
-            _curve([[0.02, 0.80], [0.32, 0.76], [0.62, 0.72]], 9),
+            _curve([[0.30, 0.50], [0.29, 0.64], [0.30, 0.78]], 8, rng, jit),
+            _curve([[0.02, 0.80], [0.32, 0.76], [0.62, 0.72 - ht]], 9, rng, jit),
             v_main(0.76),
         ]
     elif idx == 12:  # ㅛ
         return [
-            _curve([[0.35, 0.06], [0.34, 0.30], [0.35, 0.52]], 8),
-            _curve([[0.65, 0.06], [0.64, 0.30], [0.65, 0.52]], 8),
-            h_main(0.52),
+            _curve([[0.35, 0.14], [0.34, 0.42], [0.35, 0.68]], 8, rng, jit),
+            _curve([[0.65, 0.14], [0.64, 0.42], [0.65, 0.68]], 8, rng, jit),
+            h_main(0.68),
         ]
     elif idx == 13:  # ㅜ
-        return [h_main(0.46), _curve([[0.50, 0.46], [0.49, 0.72], [0.50, 0.96]], 9)]
-    elif idx == 14:  # ㅝ (left ㅜ sits below choseong in y=[0.56..0.92], right ㅓ spans full y=[0.02..0.98])
+        return [h_main(0.32), _curve([[0.50, 0.32], [0.49, 0.62], [0.50, 0.92]], 9, rng, jit)]
+    elif idx == 14:  # ㅝ
         return [
-            _curve([[0.02, 0.58], [0.32, 0.55], [0.60, 0.52]], 9),
-            _curve([[0.30, 0.56], [0.29, 0.74], [0.30, 0.92]], 8),
-            _curve([[0.48, 0.68], [0.62, 0.66], [0.76, 0.64]], 8),
+            _curve([[0.02, 0.58], [0.32, 0.55], [0.60, 0.52 - ht]], 9, rng, jit),
+            _curve([[0.30, 0.56], [0.29, 0.74], [0.30, 0.92]], 8, rng, jit),
+            _curve([[0.48, 0.68], [0.62, 0.66], [0.76, 0.64 - ht]], 8, rng, jit),
             v_main(0.78),
         ]
     elif idx == 15:  # ㅞ
         return [
-            _curve([[0.02, 0.58], [0.28, 0.55], [0.54, 0.52]], 9),
-            _curve([[0.26, 0.56], [0.25, 0.74], [0.26, 0.92]], 8),
-            _curve([[0.44, 0.68], [0.55, 0.66], [0.66, 0.64]], 8),
+            _curve([[0.02, 0.58], [0.28, 0.55], [0.54, 0.52 - ht]], 9, rng, jit),
+            _curve([[0.26, 0.56], [0.25, 0.74], [0.26, 0.92]], 8, rng, jit),
+            _curve([[0.44, 0.68], [0.55, 0.66], [0.66, 0.64 - ht]], 8, rng, jit),
             v_main(0.68),
             v_main(0.90),
         ]
     elif idx == 16:  # ㅟ
         return [
-            _curve([[0.02, 0.58], [0.32, 0.55], [0.62, 0.52]], 9),
-            _curve([[0.32, 0.56], [0.31, 0.74], [0.32, 0.92]], 8),
+            _curve([[0.02, 0.58], [0.32, 0.55], [0.62, 0.52 - ht]], 9, rng, jit),
+            _curve([[0.32, 0.56], [0.31, 0.74], [0.32, 0.92]], 8, rng, jit),
             v_main(0.78),
         ]
     elif idx == 17:  # ㅠ
         return [
-            h_main(0.46),
-            _curve([[0.35, 0.46], [0.34, 0.72], [0.35, 0.96]], 8),
-            _curve([[0.65, 0.46], [0.64, 0.72], [0.65, 0.96]], 8),
+            h_main(0.32),
+            _curve([[0.35, 0.32], [0.34, 0.62], [0.35, 0.92]], 8, rng, jit),
+            _curve([[0.65, 0.32], [0.64, 0.62], [0.65, 0.92]], 8, rng, jit),
         ]
     elif idx == 18:  # ㅡ
         return [h_main(0.50)]
-    elif idx == 19:  # ㅢ (left ㅡ sits below choseong at y=0.68, right ㅣ spans full y=[0.02..0.98])
-        return [_curve([[0.02, 0.68], [0.34, 0.65], [0.66, 0.62]], 9), v_main(0.78)]
+    elif idx == 19:  # ㅢ
+        return [_curve([[0.02, 0.68], [0.34, 0.65], [0.66, 0.62 - ht]], 9, rng, jit), v_main(0.78)]
     elif idx == 20:  # ㅣ
         return [v_main(0.50)]
     return []
@@ -339,16 +502,17 @@ def jongseong_strokes(
     idx: int,
     rng: np.random.Generator | None = None,
     connectedness: float = 0.5,
+    profile: WriterProfile | None = None,
 ) -> list[np.ndarray]:
     if idx == 0:
         return []
     base_idx = JONGSEONG_MAP[idx]
     if base_idx is not None:
-        return choseong_strokes(base_idx, rng=rng, connectedness=connectedness)
+        return choseong_strokes(base_idx, rng=rng, connectedness=connectedness, profile=profile)
     if idx in COMPOSITE_JONGSEONG:
         left_c, right_c = COMPOSITE_JONGSEONG[idx]
-        s_left = _transform_strokes(choseong_strokes(left_c, rng=rng, connectedness=connectedness), 0.0, 0.0, 0.47, 1.0)
-        s_right = _transform_strokes(choseong_strokes(right_c, rng=rng, connectedness=connectedness), 0.53, 0.0, 0.47, 1.0)
+        s_left = _transform_strokes(choseong_strokes(left_c, rng=rng, connectedness=connectedness, profile=profile), 0.0, 0.0, 0.47, 1.0)
+        s_right = _transform_strokes(choseong_strokes(right_c, rng=rng, connectedness=connectedness, profile=profile), 0.53, 0.0, 0.47, 1.0)
         return s_left + s_right
     return []
 
@@ -363,16 +527,18 @@ def _transform_strokes(
     neatness: float = 0.6,
 ) -> list[np.ndarray]:
     if rng is not None:
-        clumsy = max(0.25, 1.85 - 1.65 * float(np.clip(neatness, 0.0, 1.0)))
-        dx = float(np.clip(rng.normal(0.0, 0.018 * w * clumsy), -0.045 * w, 0.045 * w))
-        dy = float(np.clip(rng.normal(0.0, 0.018 * h * clumsy), -0.045 * h, 0.045 * h))
+        clumsy = max(0.45, 1.75 - 1.35 * float(np.clip(neatness, 0.0, 1.0)))
+        dx = float(np.clip(rng.normal(0.0, 0.018 * w * clumsy), -0.042 * w, 0.042 * w))
+        dy = float(np.clip(rng.normal(0.0, 0.018 * h * clumsy), -0.042 * h, 0.042 * h))
         x += dx
         y += dy
-        w *= float(np.clip(np.exp(rng.normal(0.0, 0.028 * clumsy)), 0.88, 1.13))
-        h *= float(np.clip(np.exp(rng.normal(0.0, 0.028 * clumsy)), 0.88, 1.13))
-        rot = float(np.radians(np.clip(rng.normal(0.0, 1.1 * clumsy), -3.5, 3.5)))
+        w *= float(np.clip(np.exp(rng.normal(0.0, 0.032 * clumsy)), 0.90, 1.11))
+        h *= float(np.clip(np.exp(rng.normal(0.0, 0.032 * clumsy)), 0.90, 1.11))
+        rot = float(np.radians(np.clip(rng.normal(0.0, 0.9 * clumsy), -2.2, 2.2)))
+        shear_x = float(np.clip(rng.normal(0.0, 0.020 * clumsy), -0.045, 0.045))
     else:
         rot = 0.0
+        shear_x = 0.0
 
     c, s_rot = np.cos(rot), np.sin(rot)
     cx, cy = x + 0.5 * w, y + 0.5 * h
@@ -382,7 +548,7 @@ def _transform_strokes(
         if len(s) == 0:
             continue
         p = s.copy()
-        px = x + p[:, 0] * w
+        px = x + p[:, 0] * w + shear_x * (p[:, 1] - 0.5) * w
         py = y + p[:, 1] * h
         if rot != 0.0:
             dx, dy = px - cx, py - cy
@@ -393,11 +559,11 @@ def _transform_strokes(
 
 
 def _soft_connect(strokes: list[np.ndarray], connectedness: float, rng: np.random.Generator | None) -> list[np.ndarray]:
-    """Cursive ligature: occasionally connects nearby consecutive strokes within a syllable."""
-    if connectedness < 0.35 or len(strokes) < 2:
+    """Cursive ligature: only merges consecutive strokes whose endpoints are already virtually touching."""
+    if connectedness < 0.45 or len(strokes) < 2:
         return strokes
-    p_link = min(0.92, 0.72 * (connectedness - 0.25))
-    max_dist = 0.92 if connectedness >= 0.75 else 0.55
+    p_link = min(0.75, 0.65 * (connectedness - 0.35))
+    max_dist = 0.14
     out = [strokes[0]]
     for s in strokes[1:]:
         prev_end = out[-1][-1]
@@ -405,8 +571,8 @@ def _soft_connect(strokes: list[np.ndarray], connectedness: float, rng: np.rando
         dist = float(np.linalg.norm(cur_start - prev_end))
         roll = float(rng.random()) if rng is not None else 0.5
         if dist < max_dist and roll < p_link:
-            mid = 0.5 * (prev_end + cur_start) + np.array([0.0, 0.03 * dist])
-            bridge = _curve([prev_end.tolist(), mid.tolist(), cur_start.tolist()], n=6)
+            mid = 0.5 * (prev_end + cur_start) + np.array([0.0, 0.02 * dist])
+            bridge = _curve([prev_end.tolist(), mid.tolist(), cur_start.tolist()], n=4)
             out[-1] = np.concatenate([out[-1], bridge[1:-1], s], axis=0)
         else:
             out.append(s)
@@ -418,12 +584,9 @@ def syllable_strokes(
     rng: np.random.Generator | None = None,
     connectedness: float = 0.5,
     neatness: float = 0.6,
+    profile: WriterProfile | None = None,
 ) -> list[np.ndarray]:
-    """Given a Hangul syllable, returns natural handwriting strokes.
-
-    Normalized font box matches English cap/ascender height:
-      x in [0.0, 1.42], y in [-1.72, +0.18] (baseline at y == 0, y down).
-    """
+    """Given a Hangul syllable, returns natural handwriting strokes with allograph & writer profile variation."""
     code = ord(char)
     if not (0xAC00 <= code <= 0xD7A3):
         return []
@@ -434,51 +597,60 @@ def syllable_strokes(
     f_idx = s_idx % 28
 
     has_jong = f_idx > 0
-    c_st = choseong_strokes(c_idx, rng=rng, connectedness=connectedness)
-    j_st = jungseong_strokes(j_idx, connectedness=connectedness)
-    f_st = jongseong_strokes(f_idx, rng=rng, connectedness=connectedness)
+    eff_conn = connectedness if profile is None else float(np.clip(0.6 * connectedness + 0.4 * profile.allograph_bias, 0.0, 1.0))
+    c_st = choseong_strokes(c_idx, rng=rng, connectedness=eff_conn, profile=profile)
+    j_st = jungseong_strokes(j_idx, connectedness=eff_conn, rng=rng, profile=profile)
+    f_st = jongseong_strokes(f_idx, rng=rng, connectedness=eff_conn, profile=profile)
 
-    # Syllables without jongseong are slightly more compact vertically than 3-tier syllables with jongseong
+    w_sc = profile.w_scale if profile is not None else 1.0
+    h_sc = profile.h_scale if profile is not None else 1.0
+    cho_sc = float(np.clip(profile.cho_scale if profile is not None else 1.0, 0.90, 1.12))
+    jong_sc = float(np.clip(profile.jong_scale if profile is not None else 1.0, 0.88, 1.10))
+
+    if rng is not None:
+        clumsy_s = max(0.28, 1.85 - 1.68 * float(np.clip(neatness, 0.0, 1.0)))
+        w_sc *= float(np.clip(np.exp(rng.normal(0.0, 0.080 * clumsy_s)), 0.85, 1.18))
+        h_sc *= float(np.clip(np.exp(rng.normal(0.0, 0.072 * clumsy_s)), 0.86, 1.16))
+
     if has_jong:
-        W = 1.60
-        Y_TOP = -1.88
-        H = 2.08
+        W = 1.56 * w_sc
+        H = 1.96 * h_sc
+        Y_TOP = -0.96 * H
     else:
-        W = 1.50
-        Y_TOP = -1.78
-        H = 1.82
+        W = 1.46 * w_sc
+        H = 1.78 * h_sc
+        Y_TOP = -0.98 * H
 
     strokes: list[np.ndarray] = []
 
     if j_idx in JUNGSEONG_VERTICAL:
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.04 * W, Y_TOP + 0.08 * H, 0.44 * W, 0.80 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(c_st, 0.04 * W, Y_TOP + 0.08 * H, 0.44 * W * cho_sc, 0.80 * H * cho_sc, rng, neatness=neatness)
             strokes += _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.46 * W, 0.94 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.05 * W, Y_TOP + 0.05 * H, 0.43 * W, 0.50 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(c_st, 0.05 * W, Y_TOP + 0.05 * H, 0.43 * W * cho_sc, 0.50 * H * cho_sc, rng, neatness=neatness)
             strokes += _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.45 * W, 0.56 * H, rng, neatness=neatness)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.60 * H, 0.68 * W, 0.37 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.60 * H, 0.68 * W * jong_sc, 0.37 * H * jong_sc, rng, neatness=neatness)
 
     elif j_idx in JUNGSEONG_HORIZONTAL:
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.16 * W, Y_TOP + 0.04 * H, 0.66 * W, 0.46 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(c_st, 0.16 * W, Y_TOP + 0.04 * H, 0.66 * W * cho_sc, 0.46 * H * cho_sc, rng, neatness=neatness)
             strokes += _transform_strokes(j_st, 0.05 * W, Y_TOP + 0.52 * H, 0.90 * W, 0.44 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.18 * W, Y_TOP + 0.03 * H, 0.64 * W, 0.36 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(c_st, 0.18 * W, Y_TOP + 0.03 * H, 0.64 * W * cho_sc, 0.36 * H * cho_sc, rng, neatness=neatness)
             strokes += _transform_strokes(j_st, 0.06 * W, Y_TOP + 0.40 * H, 0.88 * W, 0.24 * H, rng, neatness=neatness)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.65 * H, 0.68 * W, 0.33 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.65 * H, 0.68 * W * jong_sc, 0.33 * H * jong_sc, rng, neatness=neatness)
 
     else:
-        # Complex vowel (ㅘ, ㅙ, ㅚ, ㅝ, ㅞ, ㅟ, ㅢ): j_st spans from top (Y_TOP + 0.02*H) so right vertical stem is full-height!
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.05 * H, 0.44 * W, 0.42 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.05 * H, 0.44 * W * cho_sc, 0.42 * H * cho_sc, rng, neatness=neatness)
             strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.94 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.03 * H, 0.44 * W, 0.30 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.03 * H, 0.44 * W * cho_sc, 0.30 * H * cho_sc, rng, neatness=neatness)
             strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.58 * H, rng, neatness=neatness)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.63 * H, 0.68 * W, 0.35 * H, rng, neatness=neatness)
+            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.63 * H, 0.68 * W * jong_sc, 0.35 * H * jong_sc, rng, neatness=neatness)
 
-    return _soft_connect(strokes, connectedness, rng)
+    return _soft_connect(strokes, eff_conn, rng)
 
 
 def is_hangul(char: str) -> bool:
@@ -497,16 +669,17 @@ def hangul_char_strokes(
     rng: np.random.Generator | None = None,
     connectedness: float = 0.5,
     neatness: float = 0.6,
+    profile: WriterProfile | None = None,
 ) -> list[np.ndarray]:
     code = ord(char)
     if 0xAC00 <= code <= 0xD7A3:
-        return syllable_strokes(char, rng=rng, connectedness=connectedness, neatness=neatness)
+        return syllable_strokes(char, rng=rng, connectedness=connectedness, neatness=neatness, profile=profile)
     if char in CHOSEONG_NAMES:
         idx = CHOSEONG_NAMES.index(char)
-        st = _transform_strokes(choseong_strokes(idx), 0.1, -1.35, 1.15, 1.35, rng, neatness=neatness)
+        st = _transform_strokes(choseong_strokes(idx, rng=rng, connectedness=connectedness, profile=profile), 0.1, -1.35, 1.15, 1.35, rng, neatness=neatness)
         return _soft_connect(st, connectedness, rng)
     if char in JUNGSEONG_NAMES:
         idx = JUNGSEONG_NAMES.index(char)
-        st = _transform_strokes(jungseong_strokes(idx, connectedness=connectedness), 0.1, -1.35, 1.15, 1.35, rng, neatness=neatness)
+        st = _transform_strokes(jungseong_strokes(idx, connectedness=connectedness, rng=rng, profile=profile), 0.1, -1.35, 1.15, 1.35, rng, neatness=neatness)
         return _soft_connect(st, connectedness, rng)
     return []

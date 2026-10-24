@@ -42,6 +42,8 @@ wandb/
 
 # Scratch & local tests
 scratch/
+outputs/
+.superpowers/
 words.tgz.zip
 *.zip
 *.tgz

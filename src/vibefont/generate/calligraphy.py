@@ -21,7 +21,7 @@ import numpy as np
 from ..document.layout import Page, page_size
 from ..ink import EOS, NCOLS, P, T, X, Y, Ink
 from ..vibe.spec import VibeSpec
-from .hangul import _curve, hangul_char_strokes, is_hangul
+from .hangul import WriterProfile, _curve, hangul_char_strokes, is_hangul, sample_writer_profile
 from .kinematics import densify
 from .procedural import ProceduralGenerator
 
@@ -119,12 +119,13 @@ def _sculpt_ko_syllable_strokes(
     rng: np.random.Generator,
     is_hero: bool,
     is_word_end: bool,
+    profile: WriterProfile | None = None,
 ) -> list[tuple[np.ndarray, float, bool]]:
     """Generates calligraphic Hangul syllable strokes with 횡세종태 contrast, 장획, and 삐침/파임.
 
     Returns list of (stroke_xy, stroke_weight, is_tail_stroke).
     """
-    raw = hangul_char_strokes(ch, rng=rng, connectedness=0.72, neatness=0.85)
+    raw = hangul_char_strokes(ch, rng=rng, connectedness=0.72, neatness=0.82, profile=profile)
     if not raw:
         return []
 
@@ -273,6 +274,7 @@ def compose_calligraphy_page(
     raw_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
     proc = ProceduralGenerator()
     script_font = proc.fonts["fancy"]
+    profile = sample_writer_profile(rng, spec.style)
 
     line_inks: list[Ink] = []
     base_size_mm = 4.85 if has_ko else 3.25
@@ -301,12 +303,12 @@ def compose_calligraphy_page(
                 # Render stem syllables (bold, large, expressive, with clean breathing room)
                 for c_i, ch in enumerate(stem):
                     is_end = (c_i == len(stem) - 1) and not particle
-                    sc = (1.26 if is_line_hero else 1.08) * float(rng.uniform(0.96, 1.05))
+                    sc = (1.26 if is_line_hero else 1.08) * float(rng.uniform(0.95, 1.06))
                     # Dancing calligraphic baseline rhythm (지그재그 높낮이)
                     dy = float(rng.uniform(-0.14, 0.14)) + (-0.10 if c_i % 2 == 1 else 0.05)
-                    rot = np.radians(float(rng.uniform(-2.8, 2.2)))
+                    rot = np.radians(float(rng.uniform(-3.2, 2.5)))
                     c_rot, s_rot = np.cos(rot), np.sin(rot)
-                    sculpted = _sculpt_ko_syllable_strokes(ch, rng, is_hero=is_line_hero, is_word_end=is_end)
+                    sculpted = _sculpt_ko_syllable_strokes(ch, rng, is_hero=is_line_hero, is_word_end=is_end, profile=profile)
                     if not sculpted:
                         cursor_x += 1.0
                         continue
@@ -324,9 +326,9 @@ def compose_calligraphy_page(
 
                 # Render trailing grammatical particle smaller & tucked beside the stem
                 for c_i, ch in enumerate(particle):
-                    sc = 0.82 * float(rng.uniform(0.96, 1.04))
+                    sc = 0.82 * float(rng.uniform(0.95, 1.05))
                     dy = float(rng.uniform(-0.04, 0.12))
-                    sculpted = _sculpt_ko_syllable_strokes(ch, rng, is_hero=False, is_word_end=(c_i == len(particle) - 1))
+                    sculpted = _sculpt_ko_syllable_strokes(ch, rng, is_hero=False, is_word_end=(c_i == len(particle) - 1), profile=profile)
                     if not sculpted:
                         cursor_x += 0.55
                         continue
@@ -345,7 +347,7 @@ def compose_calligraphy_page(
                 is_func = clean_w in _EN_FUNCTION_WORDS and not is_line_hero
                 sc = 0.86 if is_func else (1.22 if is_line_hero else 1.05)
                 s_weight = 0.78 if is_func else (1.02 if is_line_hero else 0.92)
-                w_strokes, w_width = script_font.word(word, rng=rng, connectedness=0.92, neatness=0.90)
+                w_strokes, w_width = script_font.word(word, rng=rng, connectedness=0.92, neatness=0.88, profile=profile)
                 if not w_strokes:
                     cursor_x += 0.8
                     continue

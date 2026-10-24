@@ -34,6 +34,7 @@ class LineState:
     word_spacing_scale: float
     temperature: float  # sampling temperature handed to the stroke model
     neatness: float  # effective neatness after fatigue
+    writer_seed: int = 0  # document-wide seed for consistent writer archetype
 
 
 class _OU:
@@ -54,6 +55,7 @@ class DocumentDrift:
         self.rng = rng
         self.expected_lines = max(expected_lines, 1)
         self.k = 0
+        self.writer_seed = int(rng.integers(1, 2**31 - 1))
         loose = 1.6 - 1.2 * style.consistency  # 0.4 (steady) .. 1.6 (drifty)
         self._slant = _OU(0.0, 2.5 * loose, 0.30, rng)
         self._size = _OU(0.0, 0.05 * loose, 0.30, rng)
@@ -78,6 +80,7 @@ class DocumentDrift:
             word_spacing_scale=float(np.exp(self._wsp.step())) * (1.0 + 0.10 * fat),
             temperature=0.55 + 0.6 * (1.0 - neat) + 0.15 * s.speed,
             neatness=neat,
+            writer_seed=self.writer_seed,
         )
         self.k += 1
         return st

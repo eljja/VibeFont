@@ -29,8 +29,10 @@ def _place(ink: Ink, spec: VibeSpec, st: LineState, x_mm: float, y_mm: float,
     ink = ink.translate(-xmin, 0.0)
     size = spec.style.size_mm * st.size_scale
     ink = ink.scale(size)
-    ink = ink.rotate(-st.tilt_deg)  # + tilt = rising to the right (y down -> negative rotation)
-    return ink.translate(x_mm, y_mm)
+    tilt = st.tilt_deg * (0.20 if spec.paper.type in ("ruled", "grid") else 1.0)
+    ink = ink.rotate(-tilt)  # + tilt = rising to the right (y down -> negative rotation)
+    y_off = st.baseline_offset_mm * (0.35 if spec.paper.type in ("ruled", "grid") else 1.0)
+    return ink.translate(x_mm, y_mm + y_off)
 
 
 def write_document(text: str, spec: VibeSpec, gen: StrokeGenerator, rng: np.random.Generator | None = None,
@@ -80,7 +82,7 @@ def write_document(text: str, spec: VibeSpec, gen: StrokeGenerator, rng: np.rand
                     return pages
                 pages.append(Page(w_mm, h_mm))
                 line_idx = 0
-            placed_line = _place(ink, spec, st, left + st.margin_offset_mm, bases[line_idx] + st.baseline_offset_mm, slant_w)
+            placed_line = _place(ink, spec, st, left + st.margin_offset_mm, bases[line_idx], slant_w)
             if spec.layout.align == "center" and len(placed_line):
                 lx0, _, lx1, _ = placed_line.bbox()
                 lw = lx1 - lx0
