@@ -20,6 +20,7 @@ from ..document.layout import Page
 from ..vibe.spec import VibeSpec
 from .paper import make_paper
 from .pens import pen_samples
+from .fluid import feather_anisotropic, fibre_field
 
 _CHUNK = 6000
 
@@ -227,8 +228,8 @@ def render_page(page: Page, spec: VibeSpec, dpi: int = 300, rng: np.random.Gener
 
     # 3. Fibre feathering along paper weave
     if feather > 0:
-        spread = gaussian_filter(D, 0.11 * px)
-        D = D + feather * 0.65 * np.maximum(spread - D, 0) * (0.35 + 0.90 * tooth)
+        th, str_f = fibre_field(D.shape, rng, px)
+        D = feather_anisotropic(D, th, str_f, amount=feather * 0.65, px_per_mm=px)
 
     # Keep pencil grain crisp; softly anti-alias wet ink edges
     blur_sigma = 0.14 if spec.pen.type == "pencil" else 0.28

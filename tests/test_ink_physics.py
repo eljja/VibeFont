@@ -3,6 +3,7 @@ import pytest
 
 from vibefont.ink import Ink, X, Y, T, P, EOS
 from vibefont.render.pens import pen_samples
+from vibefont.render.fluid import feather_anisotropic, fibre_field
 from vibefont.vibe.spec import PenSpec, StyleSpec
 
 
@@ -44,3 +45,40 @@ def test_dwell_pooling_does_not_leak_into_pencil():
     ink = ink_with_pause(0.6)
     d = pen_samples(ink, PenSpec(type="pencil", width_mm=0.5), StyleSpec(), np.random.default_rng(0)).dens
     assert d[idx_at(ink, 10.0)] <= 1.15 * np.median(d)
+
+
+def gaussian_dot(size: int = 64, sigma: float = 3.0) -> np.ndarray:
+    y, x = np.mgrid[-size // 2:size // 2, -size // 2:size // 2]
+    return np.exp(-(x**2 + y**2) / (2 * sigma**2)).astype(np.float32)
+
+
+def second_moments(img: np.ndarray) -> tuple[float, float]:
+    y, x = np.mgrid[:img.shape[0], :img.shape[1]]
+    total = float(img.sum())
+    if total < 1e-9:
+        return 0.0, 0.0
+    cx = float((x * img).sum() / total)
+    cy = float((y * img).sum() / total)
+    Ixx = float(((x - cx)**2 * img).sum() / total)
+    Iyy = float(((y - cy)**2 * img).sum() / total)
+    return Ixx, Iyy
+
+
+def test_feather_spreads_along_fibres():
+    D = gaussian_dot(64, sigma=3.0)
+    th = np.zeros_like(D)
+    s = np.ones_like(D)
+    out = feather_anisotropic(D, th, s, amount=0.8, px_per_mm=11.8)
+    Ixx, Iyy = second_moments(out)
+    assert Ixx / Iyy >= 1.4
+
+
+def test_feather_amount_zero_is_identity():
+    D = gaussian_dot(64, 3.0)
+    assert np.array_equal(feather_anisotropic(D, np.zeros_like(D), np.ones_like(D), 0.0, 11.8), D)
+
+
+def test_feather_mass_bounded():
+    D = gaussian_dot(64, 3.0)
+    out = feather_anisotropic(D, np.zeros_like(D), np.ones_like(D), 0.8, 11.8)
+    assert D.sum() <= out.sum() <= 1.25 * D.sum()
