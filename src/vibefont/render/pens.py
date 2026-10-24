@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
 from ..ink import P, T, Ink
 from ..preprocess import pseudo_pressure
@@ -130,6 +131,68 @@ def _dwell_pool(ink: Ink, radius_mm: float = 0.25, tau_s: float = 0.25) -> np.nd
     return pool
 
 
+def _ballpoint_goop(
+    ink: Ink,
+    rng: np.random.Generator,
+    accum_per_mm: float = 0.06,
+    release_curv: float = 2.2,
+    ball_d_mm: float = 0.7,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Models ballpoint socket paste accumulation + corner blob release and rotational ball-skip micro-gaps.
+
+    Returns:
+        blob: additive ink deposit intensity (0..1.5) at sharp turns / stroke restarts
+        skip: fractional ink starvation factor (0..1) scaling dryness
+    """
+    n = len(ink)
+    blob = np.zeros(n, dtype=np.float64)
+    skip = np.zeros(n, dtype=np.float64)
+    if n == 0:
+        return blob, skip
+
+    v = _speed_mm_s(ink)
+    curv, _ = _curvature_and_downbias(ink)
+    ball_circ = np.pi * ball_d_mm
+
+    for sl in ink.stroke_slices():
+        s = ink.points[sl].astype(np.float64)
+        if len(s) < 2:
+            continue
+        xy = s[:, :2]
+        diffs = np.linalg.norm(np.diff(xy, axis=0), axis=1)
+        ds = np.concatenate([[0.0], diffs])
+        arc = np.cumsum(ds)
+
+        # 1. Rotational skip: cyclic variation with ball circumference + speed starvation
+        phase = 2.0 * np.pi * arc / ball_circ
+        phase_offset = float(rng.uniform(0.0, 2.0 * np.pi))
+        periodic = 0.5 * (1.0 + np.sin(phase + phase_offset))
+        v_sl = v[sl]
+        skip_prob = np.clip((v_sl - 25.0) / 140.0, 0.01, 0.75)
+        skip[sl] = skip_prob * (0.35 + 0.65 * periodic)
+
+        # 2. Paste accumulation and corner release
+        curv_sl = curv[sl]
+        raw_blob = np.zeros(len(s), dtype=np.float64)
+        accum = 0.0
+        for i in range(len(s)):
+            accum = min(accum + accum_per_mm * ds[i], 2.0)
+            if curv_sl[i] >= release_curv:
+                rel_frac = min(1.0, (curv_sl[i] - release_curv) / 1.5)
+                deposit = accum * rel_frac
+                raw_blob[i] = deposit
+                accum = max(accum - deposit, 0.0)
+
+        # Smooth raw blob slightly over immediate neighborhood (+- 1-2 points)
+        if len(raw_blob) >= 3 and np.any(raw_blob > 0):
+            smoothed = gaussian_filter1d(raw_blob, sigma=1.2, mode="constant") * 3.0
+            blob[sl] = np.maximum(raw_blob, smoothed)
+        else:
+            blob[sl] = raw_blob
+
+    return blob, skip
+
+
 def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generator) -> PenSample:
     n = len(ink)
     p = ink.points[:, P].astype(np.float64) if ink.has_pressure else pseudo_pressure(ink).astype(np.float64)
@@ -144,23 +207,22 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
     dryness = np.zeros(n, dtype=np.float64)
 
     if pen.type == "ballpoint":
+        goop_blob, ball_skip = _ballpoint_goop(ink, rng)
         # Crisp oil-paste ballpoint: thin on upstrokes/flicks, fuller on downstrokes
         taper = np.clip(1.0 - 0.52 * end, 0.30, 1.0)
         w = W * (0.48 + 0.50 * p + 0.12 * np.maximum(down, 0)) * taper
         # Paste ink transfers strongly when pulling down, skims lightly when pushing up
         dens = (0.58 + 0.72 * p) * (0.78 + 0.28 * down)
-        skip_amt = np.clip((v - 38.0) / 145.0, 0.0, 0.75)
         nz = _arc_noise(ink, rng, 0.55)
-        dryness = np.clip(skip_amt * np.clip((nz - 0.35) * 2.0, 0, 1) + 0.25 * np.maximum(-down, 0), 0.0, 0.78)
+        dryness = np.clip(ball_skip * (0.4 + 0.6 * np.clip((nz - 0.35) * 2.0, 0, 1)) + 0.25 * np.maximum(-down, 0), 0.0, 0.82)
         dens *= 1.0 - 0.52 * dryness
-        # Occasional dry start before ball catches traction + dark ink blob at sharp turns
+        # Occasional dry start before ball catches traction
         start_gate = np.zeros(n)
         for sl in ink.stroke_slices():
             start_gate[sl] = -0.38 if rng.random() < 0.30 else (0.70 if rng.random() < 0.25 else 0.0)
-        corner_blob = np.clip((curv - 2.2) / 5.0, 0.0, 1.0) * (0.5 + 0.5 * nz)
-        dens = np.clip(dens * (1.0 + start * start_gate) + 0.90 * corner_blob, 0.24, 2.4)
+        dens = np.clip(dens * (1.0 + start * start_gate) + 0.90 * goop_blob, 0.24, 2.5)
         dens *= 1.0 + 0.30 * pool
-        w *= 1.0 + 0.22 * corner_blob
+        w *= 1.0 + 0.22 * np.clip(goop_blob, 0.0, 1.0)
         grain = 0.36
         dry_streak = 0.42
     elif pen.type == "gel":
