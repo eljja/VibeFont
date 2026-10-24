@@ -273,14 +273,15 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         w = W * (0.18 + 1.02 * np.power(p, 1.22)) * dir_belly * taper
         # Bristle ink depletion & high-speed dry-brush (갈필 / 비백)
         nz = _arc_noise(ink, rng, 1.1)
-        speed_dry = np.clip((v - 58.0) / 160.0, 0.0, 0.80)
+        speed_dry = np.clip((v - 55.0) / 140.0, 0.0, 0.85)
         tail_dry = np.clip(end * 1.15 - 0.18, 0.0, 0.85) * (1.0 - 0.5 * p)
-        dryness = np.clip((0.50 * speed_dry + 0.60 * tail_dry) * (0.45 + 0.75 * nz), 0.0, 0.88)
+        dryness = np.clip((0.55 * speed_dry + 0.55 * tail_dry) * (0.50 + 0.70 * nz), 0.0, 0.90)
         dens = (0.88 + 0.62 * p) * (1.0 - 0.38 * dryness) * (1.0 + 0.32 * start)
-        grain = 0.62
+        grain = 0.65
         feather = 0.20
-        dry_streak = 0.76
+        dry_streak = 0.78
         rim_halo = 0.22
+        porous_threshold = 0.28
     elif pen.type == "broad_nib":
         th = _direction(ink)
         chisel = np.abs(np.sin(th - np.radians(pen.nib_angle_deg)))

@@ -98,3 +98,28 @@ def wet_overlap_bleed(
         return np.zeros_like(B_new)
     bleed = gain * gaussian_filter(overlap, sigma_px)
     return bleed.astype(np.float32)
+
+
+def bristle_striations(
+    u_perp: np.ndarray,
+    dryness: np.ndarray,
+    dry_streak: float,
+    num_filaments: int = 9,
+) -> np.ndarray:
+    """Calculates multi-bristle hair striation modulation across stroke transverse coordinate u_perp in [-1, 1].
+
+    Simulates 7 to 11 longitudinal bristle filaments. At high dryness (fast velocity or stroke tails),
+    individual hair clusters separate, leaving deep gaps between filaments (authentic 갈필 / 飛白).
+    At low dryness (wet/slow), capillary cohesion fuses the hairs into solid coverage.
+    """
+    if dry_streak <= 1e-4:
+        return np.ones_like(u_perp, dtype=np.float32)
+
+    harmonics = (
+        0.44 * np.cos(u_perp * (num_filaments * 0.5) * np.pi)
+        + 0.36 * np.cos(u_perp * (num_filaments * 1.0) * np.pi + 0.5)
+        + 0.20 * np.cos(u_perp * (num_filaments * 1.5) * np.pi + 1.2)
+    )
+    split_depth = np.clip(dry_streak * dryness * 1.35, 0.0, 1.0)
+    modulation = np.clip(1.0 - split_depth * (0.88 - 0.88 * harmonics), 0.0, 1.25)
+    return modulation.astype(np.float32)

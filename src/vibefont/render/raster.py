@@ -21,7 +21,7 @@ from ..ink import T
 from ..vibe.spec import VibeSpec
 from .paper import make_paper
 from .pens import pen_samples
-from .fluid import feather_anisotropic, fibre_field, wet_overlap_bleed
+from .fluid import bristle_striations, feather_anisotropic, fibre_field, wet_overlap_bleed
 
 _CHUNK = 6000
 
@@ -100,9 +100,7 @@ def stamp_stroke(
         cov = np.clip(rr + 0.5 - dist, 0.0, 1.0)
         if dry_streak > 0.01:
             u_perp = (dx * nx + dy * ny) / np.maximum(rr, 0.45)
-            bristle = 0.55 * np.cos(u_perp * 4.5 * np.pi) + 0.45 * np.cos(u_perp * 9.0 * np.pi + 0.8)
-            streak_mod = np.clip(1.0 - dry_streak * ddry * (0.68 - 0.68 * bristle), 0.0, 1.18)
-            cov = cov * streak_mod
+            cov = cov * bristle_striations(u_perp, ddry, dry_streak)
         cov = (cov * dd).astype(np.float32)
         m = (cov > 0) & (ix >= x0) & (ix < x1) & (iy >= y0) & (iy < y1)
         np.maximum.at(B, (iy[m] - y0, ix[m] - x0), cov[m])
