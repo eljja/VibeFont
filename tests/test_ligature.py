@@ -2,6 +2,11 @@ import numpy as np
 import pytest
 
 from vibefont.generate.procedural import _Font
+from vibefont.generate.hangul import (
+    join_jamo_groups,
+    syllable_strokes,
+    syllable_strokes_with_joins,
+)
 from vibefont.generate.ligature import (
     PlacedGlyph,
     GlyphAnchors,
@@ -157,3 +162,39 @@ def test_edge_words_capitals_punctuation_single_letters():
         assert width > 0
     r = connect_word(_Font("cursive").place_glyphs("Hello,", np.random.default_rng(1), 0.95, 0.7, None), np.random.default_rng(1), 0.97)
     assert all(j.prev_ch.islower() and j.next_ch.islower() for j in r.joins)
+
+
+def test_join_jamo_groups_never_joins_inside_a_group_beyond_touching():
+    g1 = [line((0.0, 0.0), (1.0, 0.0), 11), line((0.0, 0.5), (1.0, 0.5), 11)]   # ㄷ-like: 2 strokes, gap 0.5
+    g2 = [line((1.1, 0.5), (1.1, -1.0), 11)]
+    out, joins = join_jamo_groups([g1, g2], 0.95, np.random.default_rng(0))
+    assert len(out) >= 2 and len(joins) <= 1
+
+
+def test_hangul_cursive_reduces_pen_lifts():
+    txt = "가나다라마바사아자차"
+    def mean_strokes(conn):
+        return np.mean([len(syllable_strokes(c, rng=np.random.default_rng(i), connectedness=conn, neatness=0.7)) for i in range(10) for c in txt])
+    assert mean_strokes(0.9) <= 0.85 * mean_strokes(0.3)
+
+
+def test_hangul_connectors_never_cross_other_strokes():
+    for seed in range(20):
+        for ch in "강물이흐르는밤":
+            st, joins = syllable_strokes_with_joins(ch, np.random.default_rng(seed), 0.95, 0.7, None)
+            for j in joins:
+                if j.path is not None:
+                    # Connector path must not intersect any other stroke in syllable
+                    assert not any(polylines_intersect(j.path, s) for s in st if not np.array_equal(s, j.path))
+
+
+def test_mixed_script_word_no_join_across_boundary():
+    st, _ = _Font("cursive").word("VibeFont한글", rng=np.random.default_rng(0), connectedness=0.95, neatness=0.7)
+    # Confirm strokes are separated across Latin/Hangul boundary
+    assert len(st) > 1
+    # Check that no single stroke stretches across the transition between Latin (x ~ 6) and Hangul
+    latin_end_x = 5.5
+    hangul_start_x = 6.2
+    for s in st:
+        min_sx, max_sx = s[:, 0].min(), s[:, 0].max()
+        assert not (min_sx < latin_end_x and max_sx > hangul_start_x), "stroke crosses script boundary"

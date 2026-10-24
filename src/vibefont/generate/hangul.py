@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..vibe.spec import StyleSpec
+from .ligature import JoinInfo, join_strokes, turn_angle_deg, polylines_intersect
 
 CHOSEONG_NAMES = [
     "ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ", "ㅅ",
@@ -579,17 +580,86 @@ def _soft_connect(strokes: list[np.ndarray], connectedness: float, rng: np.rando
     return out
 
 
-def syllable_strokes(
+def join_jamo_groups(
+    groups: list[list[np.ndarray]],
+    connectedness: float,
+    rng: np.random.Generator | None = None,
+) -> tuple[list[np.ndarray], list[JoinInfo]]:
+    """Connect across distinct jamo groups (choseong, jungseong, jongseong) in cursive styles."""
+    cleaned_groups: list[list[np.ndarray]] = []
+    for g in groups:
+        if not g:
+            continue
+        c_g = _soft_connect(g, connectedness, rng)
+        if c_g:
+            cleaned_groups.append([s.copy() for s in c_g])
+
+    if not cleaned_groups:
+        return [], []
+
+    p_cross = float(np.clip(1.5 * (connectedness - 0.40), 0.0, 0.88))
+    joins: list[JoinInfo] = []
+
+    out_strokes: list[np.ndarray] = [s for s in cleaned_groups[0]]
+
+    for g_next in cleaned_groups[1:]:
+        if not g_next or not out_strokes:
+            out_strokes.extend(g_next)
+            continue
+
+        tail_a = out_strokes[-1]
+        head_b = g_next[0]
+        gap = float(np.linalg.norm(head_b[0] - tail_a[-1]))
+        roll = float(rng.random()) if rng is not None else 0.5
+
+        joined_done = False
+        if roll < p_cross and len(tail_a) >= 2 and len(head_b) >= 2:
+            if gap <= 0.30:
+                joined = join_strokes(tail_a, head_b, rng, zone=0.20, max_gap=0.30)
+                if joined is not None:
+                    j_idx = len(tail_a) - 1
+                    turn = turn_angle_deg(joined, j_idx, k=1)
+                    if turn <= 75.0:
+                        pt = (float(joined[j_idx, 0]), float(joined[j_idx, 1]))
+                        joins.append(JoinInfo(prev_ch="", next_ch="", point=pt, turn_deg=turn))
+                        out_strokes[-1] = joined
+                        out_strokes.extend(g_next[1:])
+                        joined_done = True
+            elif 0.30 < gap <= 1.65 and connectedness >= 0.70:
+                p0 = tail_a[-1]
+                p1 = head_b[0]
+                dxy = p1 - p0
+                d_len = max(float(np.linalg.norm(dxy)), 1e-4)
+                norm = np.array([-dxy[1] / d_len, dxy[0] / d_len])
+                offset = 0.04 * d_len if rng is None else float(rng.uniform(0.02, 0.06))
+                mid_ctrl = 0.5 * (p0 + p1) + norm * offset
+                path = _curve([p0.tolist(), mid_ctrl.tolist(), p1.tolist()], n=7)
+
+                all_current = out_strokes + g_next
+                intersects = any(polylines_intersect(path, s, ignore_endpoints=True) for s in all_current)
+                if not intersects:
+                    joins.append(JoinInfo(prev_ch="", next_ch="", point=(float(mid_ctrl[0]), float(mid_ctrl[1])), turn_deg=0.0, path=path))
+                    out_strokes[-1] = np.concatenate([tail_a, path[1:-1], head_b], axis=0)
+                    out_strokes.extend(g_next[1:])
+                    joined_done = True
+
+        if not joined_done:
+            out_strokes.extend(g_next)
+
+    return out_strokes, joins
+
+
+def syllable_strokes_with_joins(
     char: str,
     rng: np.random.Generator | None = None,
     connectedness: float = 0.5,
     neatness: float = 0.6,
     profile: WriterProfile | None = None,
-) -> list[np.ndarray]:
-    """Given a Hangul syllable, returns natural handwriting strokes with allograph & writer profile variation."""
+) -> tuple[list[np.ndarray], list[JoinInfo]]:
+    """Given a Hangul syllable, returns natural handwriting strokes and cross-jamo joins."""
     code = ord(char)
     if not (0xAC00 <= code <= 0xD7A3):
-        return []
+        return [], []
 
     s_idx = code - 0xAC00
     c_idx = s_idx // 588
@@ -621,36 +691,50 @@ def syllable_strokes(
         H = 1.84 * h_sc
         Y_TOP = -0.98 * H
 
-    strokes: list[np.ndarray] = []
+    group_c: list[np.ndarray] = []
+    group_j: list[np.ndarray] = []
+    group_f: list[np.ndarray] = []
 
     if j_idx in JUNGSEONG_VERTICAL:
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.04 * W, Y_TOP + 0.08 * H, 0.44 * W * cho_sc, 0.80 * H * cho_sc, rng, neatness=neatness)
-            strokes += _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.46 * W, 0.94 * H, rng, neatness=neatness)
+            group_c = _transform_strokes(c_st, 0.04 * W, Y_TOP + 0.08 * H, 0.44 * W * cho_sc, 0.80 * H * cho_sc, rng, neatness=neatness)
+            group_j = _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.46 * W, 0.94 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.05 * W, Y_TOP + 0.05 * H, 0.43 * W * cho_sc, 0.50 * H * cho_sc, rng, neatness=neatness)
-            strokes += _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.45 * W, 0.56 * H, rng, neatness=neatness)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.60 * H, 0.68 * W * jong_sc, 0.37 * H * jong_sc, rng, neatness=neatness)
+            group_c = _transform_strokes(c_st, 0.05 * W, Y_TOP + 0.05 * H, 0.43 * W * cho_sc, 0.50 * H * cho_sc, rng, neatness=neatness)
+            group_j = _transform_strokes(j_st, 0.50 * W, Y_TOP + 0.02 * H, 0.45 * W, 0.56 * H, rng, neatness=neatness)
+            group_f = _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.60 * H, 0.68 * W * jong_sc, 0.37 * H * jong_sc, rng, neatness=neatness)
 
     elif j_idx in JUNGSEONG_HORIZONTAL:
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.16 * W, Y_TOP + 0.04 * H, 0.66 * W * cho_sc, 0.46 * H * cho_sc, rng, neatness=neatness)
-            strokes += _transform_strokes(j_st, 0.05 * W, Y_TOP + 0.52 * H, 0.90 * W, 0.44 * H, rng, neatness=neatness)
+            group_c = _transform_strokes(c_st, 0.16 * W, Y_TOP + 0.04 * H, 0.66 * W * cho_sc, 0.46 * H * cho_sc, rng, neatness=neatness)
+            group_j = _transform_strokes(j_st, 0.05 * W, Y_TOP + 0.52 * H, 0.90 * W, 0.44 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.18 * W, Y_TOP + 0.03 * H, 0.64 * W * cho_sc, 0.36 * H * cho_sc, rng, neatness=neatness)
-            strokes += _transform_strokes(j_st, 0.06 * W, Y_TOP + 0.40 * H, 0.88 * W, 0.24 * H, rng, neatness=neatness)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.65 * H, 0.68 * W * jong_sc, 0.33 * H * jong_sc, rng, neatness=neatness)
+            group_c = _transform_strokes(c_st, 0.18 * W, Y_TOP + 0.03 * H, 0.64 * W * cho_sc, 0.36 * H * cho_sc, rng, neatness=neatness)
+            group_j = _transform_strokes(j_st, 0.06 * W, Y_TOP + 0.40 * H, 0.88 * W, 0.24 * H, rng, neatness=neatness)
+            group_f = _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.65 * H, 0.68 * W * jong_sc, 0.33 * H * jong_sc, rng, neatness=neatness)
 
     else:
         if not has_jong:
-            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.05 * H, 0.44 * W * cho_sc, 0.42 * H * cho_sc, rng, neatness=neatness)
-            strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.94 * H, rng, neatness=neatness)
+            group_c = _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.05 * H, 0.44 * W * cho_sc, 0.42 * H * cho_sc, rng, neatness=neatness)
+            group_j = _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.94 * H, rng, neatness=neatness)
         else:
-            strokes += _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.03 * H, 0.44 * W * cho_sc, 0.30 * H * cho_sc, rng, neatness=neatness)
-            strokes += _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.58 * H, rng, neatness=neatness)
-            strokes += _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.63 * H, 0.68 * W * jong_sc, 0.35 * H * jong_sc, rng, neatness=neatness)
+            group_c = _transform_strokes(c_st, 0.06 * W, Y_TOP + 0.03 * H, 0.44 * W * cho_sc, 0.30 * H * cho_sc, rng, neatness=neatness)
+            group_j = _transform_strokes(j_st, 0.04 * W, Y_TOP + 0.02 * H, 0.92 * W, 0.58 * H, rng, neatness=neatness)
+            group_f = _transform_strokes(f_st, 0.16 * W, Y_TOP + 0.63 * H, 0.68 * W * jong_sc, 0.35 * H * jong_sc, rng, neatness=neatness)
 
-    return _soft_connect(strokes, eff_conn, rng)
+    groups = [group_c, group_j] if not has_jong else [group_c, group_j, group_f]
+    return join_jamo_groups(groups, connectedness=eff_conn, rng=rng)
+
+
+def syllable_strokes(
+    char: str,
+    rng: np.random.Generator | None = None,
+    connectedness: float = 0.5,
+    neatness: float = 0.6,
+    profile: WriterProfile | None = None,
+) -> list[np.ndarray]:
+    """Given a Hangul syllable, returns natural handwriting strokes with allograph & writer profile variation."""
+    return syllable_strokes_with_joins(char, rng=rng, connectedness=connectedness, neatness=neatness, profile=profile)[0]
 
 
 def is_hangul(char: str) -> bool:
