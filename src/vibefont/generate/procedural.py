@@ -10,6 +10,7 @@ Limitations: Latin only (Hershey has no Hangul), letter shapes are fixed templat
 
 from __future__ import annotations
 
+import zlib
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
@@ -144,9 +145,10 @@ class _Font:
         if not glyphs:
             return [], max(0.6 * len(word), 0.1)
 
+        writer_key = zlib.crc32(repr(profile).encode("utf-8")) if profile is not None else 0
         if connectedness >= 0.4:
             p_join = float(np.clip((connectedness - 0.35) / 0.45, 0.0, 0.97))
-            res = connect_word(glyphs, rng=rng, p_join=p_join)
+            res = connect_word(glyphs, rng=rng, p_join=p_join, writer_key=writer_key)
             out_strokes = res.strokes
         else:
             out_strokes = [s for g in glyphs for s in g.strokes]

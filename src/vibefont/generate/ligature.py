@@ -7,6 +7,7 @@ and cross-glyph / cross-jamo cursive joins without CAPTCHA-like distortion.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import zlib
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
@@ -40,6 +41,26 @@ class ConnectResult:
 
 
 HIGH_EXIT = frozenset("bovw")
+
+
+def pair_bias(prev_ch: str, next_ch: str, writer_key: int) -> tuple[float, float]:
+    """Deterministic (dx, dy) reflecting per-writer letter-pair habit.
+
+    Different writers develop distinct subconscious connector habits for specific
+    frequent bigrams (e.g., slightly lower on 'er', slightly higher on 'th').
+    Uses zlib.crc32 with 32-bit bit-mixing for cross-process determinism (not Python's salted hash()).
+    """
+    key = f"{writer_key}:{prev_ch}{next_ch}".encode("utf-8")
+    h = zlib.crc32(key)
+    # 32-bit avalanche mixer
+    h = (h ^ (h >> 16)) * 0x45D9F3B & 0xFFFFFFFF
+    h = (h ^ (h >> 16)) * 0x45D9F3B & 0xFFFFFFFF
+    h = (h ^ (h >> 16)) & 0xFFFFFFFF
+    u1 = (h & 0xFFFF) / 65535.0
+    u2 = ((h >> 16) & 0xFFFF) / 65535.0
+    dx = (u1 - 0.5) * 0.18
+    dy = (u2 - 0.5) * 0.18
+    return float(dx), float(dy)
 
 
 def connect_word(
@@ -92,7 +113,11 @@ def connect_word(
             tail_a = accum_strokes[-1]
             head_b = body[0]
             meet_y = -0.98 if prev_ch in HIGH_EXIT else None
-            joined = join_strokes(tail_a, head_b, rng, zone=0.20, max_gap=0.55, meet_y=meet_y)
+            pb_x, pb_y = pair_bias(prev_ch, ch, writer_key)
+            jitter_x = float(rng.normal(0.0, 0.012))
+            jitter_y = float(rng.normal(0.0, 0.012))
+            offset = (pb_x + jitter_x, pb_y + jitter_y)
+            joined = join_strokes(tail_a, head_b, rng, zone=0.20, max_gap=0.55, meet_y=meet_y, offset=offset)
 
         if joined is not None:
             j_idx = len(accum_strokes[-1]) - 1
@@ -193,6 +218,7 @@ def join_strokes(
     zone: float = 0.20,
     max_gap: float = 0.45,
     meet_y: float | None = None,
+    offset: tuple[float, float] = (0.0, 0.0),
 ) -> np.ndarray | None:
     """Join tail of stroke a and head of stroke b by blending toward meeting point m."""
     if len(a) < 2 or len(b) < 2:
@@ -207,6 +233,8 @@ def join_strokes(
     mid = 0.5 * (tail_a + head_b)
     if meet_y is not None:
         mid[1] = meet_y
+    mid[0] += offset[0]
+    mid[1] += offset[1]
 
     arc_a = _arc_lengths(a)
     tot_a = arc_a[-1]
