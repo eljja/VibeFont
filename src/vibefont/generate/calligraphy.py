@@ -24,6 +24,7 @@ from ..vibe.spec import VibeSpec
 from .hangul import WriterProfile, _curve, hangul_char_strokes, is_hangul, sample_writer_profile
 from .kinematics import densify
 from .procedural import ProceduralGenerator
+from .semantics import SemanticArchetype, WordMorphology, analyze_semantics
 
 # Korean grammatical particles/endings that should be rendered smaller & tucked beside the stem
 _KO_PARTICLES = (
@@ -117,11 +118,12 @@ def _calligraphic_pressure_from_geometry(
 def _sculpt_ko_syllable_strokes(
     ch: str,
     rng: np.random.Generator,
-    is_hero: bool,
-    is_word_end: bool,
+    is_hero: bool = False,
+    is_word_end: bool = False,
     profile: WriterProfile | None = None,
+    morph: WordMorphology | None = None,
 ) -> list[tuple[np.ndarray, float, bool]]:
-    """Generates calligraphic Hangul syllable strokes with 횡세종태 contrast, 장획, and 삐침/파임.
+    """Generates calligraphic Hangul syllable strokes with semantic emotion, 횡세종태, and 삐침/파임.
 
     Returns list of (stroke_xy, stroke_weight, is_tail_stroke).
     """
@@ -129,9 +131,27 @@ def _sculpt_ko_syllable_strokes(
     if not raw:
         return []
 
+    if morph is not None:
+        is_hero = morph.is_hero
+
     out: list[tuple[np.ndarray, float, bool]] = []
     n_st = len(raw)
+
+    # Base stroke weight modulated by semantic archetype
     w_base = 1.00 if is_hero else 0.74
+    if morph is not None:
+        w_base = (1.00 + morph.weight_boost) if is_hero else (0.74 + 0.6 * morph.weight_boost)
+        if morph.archetype == SemanticArchetype.BOLD_MASSIVE:
+            w_base *= 1.30
+        elif morph.archetype == SemanticArchetype.FLOWING_AIRY:
+            w_base *= 0.88
+        elif morph.archetype == SemanticArchetype.GENTLE_WARM:
+            w_base *= 0.96
+        elif morph.archetype == SemanticArchetype.SHARP_FIERCE:
+            w_base *= 1.10
+        elif morph.archetype == SemanticArchetype.SOARING_LUMINOUS:
+            w_base *= 1.05
+
     complexity_damp = 0.84 if n_st >= 6 else (0.92 if n_st >= 5 else 1.0)
 
     for idx, s in enumerate(raw):
@@ -139,6 +159,15 @@ def _sculpt_ko_syllable_strokes(
         if len(pts) < 3:
             out.append((pts, w_base * 0.55 * complexity_damp, False))
             continue
+
+        # Semantic aspect ratio sculpting
+        if morph is not None:
+            if morph.archetype == SemanticArchetype.SOARING_LUMINOUS:
+                pts[:, 1] *= 1.18
+                pts[:, 0] *= 0.94
+            elif morph.archetype == SemanticArchetype.BOLD_MASSIVE:
+                pts[:, 1] *= 0.96
+                pts[:, 0] *= 1.06
 
         span_x = float(pts[:, 0].max() - pts[:, 0].min())
         span_y = float(pts[:, 1].max() - pts[:, 1].min())
@@ -156,33 +185,39 @@ def _sculpt_ko_syllable_strokes(
         else:
             s_weight = w_base * 0.58 * complexity_damp
 
-        # 1. Add subtle 기필 (angled brush entry hook) at the start of primary vertical/horizontal strokes
-        if len(pts) >= 5 and (idx == 0 or span_y > 0.65):
-            hook = pts[0] + np.array([-0.04, -0.04])
+        # 1. Add 기필 (angled brush entry attack) at the start of primary vertical/horizontal strokes
+        ang = morph.angularity if morph is not None else 0.5
+        if len(pts) >= 5 and (idx == 0 or span_y > 0.65) and ang > 0.15:
+            hook_offset = np.array([-0.05 * ang, -0.05 * ang])
+            hook = pts[0] + hook_offset
             pts = np.concatenate([[hook], pts], axis=0)
 
         # 2. Expressive S-curve wave on wide horizontal strokes (장획)
         if span_x > 0.72 and span_y < 0.42:
             u = np.linspace(0.0, 1.0, len(pts))
             ext = (1.16 if is_word_end else 1.08) if is_hero else 1.04
+            if morph is not None and morph.archetype == SemanticArchetype.FLOWING_AIRY:
+                ext *= 1.15
             x0 = pts[0, 0]
             pts[:, 0] = x0 + (pts[:, 0] - x0) * ext
-            pts[:, 1] += -0.06 * u + 0.04 * np.sin(2.0 * np.pi * u)
+            wave_amp = 0.06 if (morph and morph.archetype == SemanticArchetype.FLOWING_AIRY) else 0.04
+            pts[:, 1] += -0.06 * u + wave_amp * np.sin(2.0 * np.pi * u)
             if is_hero and is_last:
                 is_tail = True
 
         # 3. Sweeping downward/diagonal brush tail on final vertical or diagonal strokes (삐침/파임)
-        elif is_last and (is_hero or is_word_end) and span_y > 0.55:
-            tail_len = (0.34 if is_hero else 0.22) * float(rng.uniform(0.88, 1.15))
+        elif is_last and (is_hero or is_word_end) and span_y > 0.50:
+            swash_mult = morph.swash_reach if morph is not None else 1.0
+            tail_len = (0.55 if is_hero else 0.35) * swash_mult * float(rng.uniform(0.95, 1.15))
             end_pt = pts[-1]
             d_end = pts[-1] - pts[-3]
             norm_d = max(float(np.linalg.norm(d_end)), 1e-4)
             dir_vec = d_end / norm_d
-            sweep_dir = np.array([0.30 * dir_vec[0] - 0.14, max(0.78, dir_vec[1])])
+            sweep_dir = np.array([0.35 * dir_vec[0] - 0.12, max(0.75, dir_vec[1])])
             sweep_dir /= np.linalg.norm(sweep_dir)
-            ctrl1 = end_pt + 0.45 * tail_len * sweep_dir
-            ctrl2 = end_pt + tail_len * (sweep_dir + np.array([-0.12, 0.10]))
-            tail_curve = _curve([end_pt.tolist(), ctrl1.tolist(), ctrl2.tolist()], n=10)
+            ctrl1 = end_pt + 0.50 * tail_len * sweep_dir
+            ctrl2 = end_pt + tail_len * (sweep_dir + np.array([-0.10, 0.12]))
+            tail_curve = _curve([end_pt.tolist(), ctrl1.tolist(), ctrl2.tolist()], n=12)
             pts = np.concatenate([pts[:-1], tail_curve], axis=0)
             is_tail = True
 
