@@ -20,6 +20,7 @@ from ..vibe.spec import StyleSpec
 from .base import LineRequest
 from .hangul import WriterProfile, hangul_char_strokes, is_hangul, sample_writer_profile
 from .kinematics import densify, strokes_to_ink
+from .ligature import PlacedGlyph, connect_word
 
 
 class _Font:
@@ -47,35 +48,19 @@ class _Font:
             out.append(np.stack([nx, ny], axis=1))
         return out
 
-    def _latin_word_strokes(
+    def place_glyphs(
         self,
         word: str,
-        rng: np.random.Generator | None = None,
+        rng: np.random.Generator,
         connectedness: float = 0.5,
         neatness: float = 0.6,
         profile: WriterProfile | None = None,
-    ) -> tuple[list[np.ndarray], float]:
-        """Character-by-character Latin synthesis with per-glyph structural & non-linear variation."""
-        if rng is None:
-            strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(word)]
-            strokes = [s for s in strokes if len(s)]
-            if not strokes:
-                return [], 0.6 * len(word)
-            allp = np.concatenate(strokes)
-            x0 = allp[:, 0].min()
-            out = self._norm_hershey(strokes, x0)
-            all_norm = np.concatenate(out)
-            min_x = float(all_norm[:, 0].min())
-            for s in out:
-                s[:, 0] -= min_x
-            width = float(all_norm[:, 0].max() - min_x)
-            return out, max(width, 0.1)
-
+    ) -> list[PlacedGlyph]:
         clumsy = max(0.45, 1.65 - 1.25 * float(np.clip(neatness, 0.0, 1.0)))
         prof_w = float(np.clip(profile.w_scale if profile is not None else 1.0, 0.88, 1.14))
         prof_h = float(np.clip(0.98 + 0.25 * ((profile.h_scale if profile is not None else 1.0) - 1.0), 0.92, 1.08))
 
-        out_strokes: list[np.ndarray] = []
+        placed_glyphs: list[PlacedGlyph] = []
         cursor_x = 0.0
         for ch in word:
             ch_raw = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(ch) if len(s)]
@@ -103,11 +88,50 @@ class _Font:
                 px = px - d_slant * py + cursor_x
                 ch_placed.append(np.stack([px, py], axis=1))
 
-            out_strokes.extend(ch_placed)
+            jitter = float(abs(np.log(sx)) + abs(np.log(sy)) + abs(dy) + abs(d_slant))
+            placed_glyphs.append(PlacedGlyph(ch=ch, strokes=ch_placed, jitter=jitter))
+
             actual_max_x = max(float(s[:, 0].max()) for s in ch_placed)
             kern_jitter = float(np.clip(rng.normal(0.0, 0.018 * clumsy), -0.04, 0.05))
             kern_base = 0.01 if connectedness >= 0.4 else (0.24 if cw < 0.25 else 0.20)
             cursor_x = max(cursor_x + 0.20, actual_max_x + max(0.0, kern_base + kern_jitter))
+
+        return placed_glyphs
+
+    def _latin_word_strokes(
+        self,
+        word: str,
+        rng: np.random.Generator | None = None,
+        connectedness: float = 0.5,
+        neatness: float = 0.6,
+        profile: WriterProfile | None = None,
+    ) -> tuple[list[np.ndarray], float]:
+        """Character-by-character Latin synthesis with per-glyph structural & non-linear variation."""
+        if rng is None:
+            strokes = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(word)]
+            strokes = [s for s in strokes if len(s)]
+            if not strokes:
+                return [], 0.6 * len(word)
+            allp = np.concatenate(strokes)
+            x0 = allp[:, 0].min()
+            out = self._norm_hershey(strokes, x0)
+            all_norm = np.concatenate(out)
+            min_x = float(all_norm[:, 0].min())
+            for s in out:
+                s[:, 0] -= min_x
+            width = float(all_norm[:, 0].max() - min_x)
+            return out, max(width, 0.1)
+
+        glyphs = self.place_glyphs(word, rng=rng, connectedness=connectedness, neatness=neatness, profile=profile)
+        if not glyphs:
+            return [], max(0.6 * len(word), 0.1)
+
+        if connectedness >= 0.4:
+            p_join = float(np.clip((connectedness - 0.35) / 0.45, 0.0, 0.97))
+            res = connect_word(glyphs, rng=rng, p_join=p_join)
+            out_strokes = res.strokes
+        else:
+            out_strokes = [s for g in glyphs for s in g.strokes]
 
         if not out_strokes:
             return [], 0.6 * len(word)

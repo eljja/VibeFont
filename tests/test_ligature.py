@@ -6,6 +6,8 @@ from vibefont.generate.ligature import (
     PlacedGlyph,
     GlyphAnchors,
     JoinInfo,
+    ConnectResult,
+    connect_word,
     find_anchors,
     join_strokes,
     merge_glyph_internal,
@@ -98,3 +100,60 @@ def test_split_delayed_i_and_t():
         anchors = find_anchors(g)
         body, delayed = split_delayed(g, anchors)
         assert len(delayed) == 1, f"expected 1 delayed stroke for {ch}, got {len(delayed)}"
+
+
+def _strokes(word: str, conn: float, seed: int):
+    return _Font("cursive")._latin_word_strokes(word, rng=np.random.default_rng(seed), connectedness=conn, neatness=0.7)[0]
+
+
+def test_cursive_word_pen_lifts_drop():
+    hi = np.mean([len(_strokes("minimum", 0.95, s)) for s in range(5)])
+    lo = np.mean([len(_strokes("minimum", 0.30, s)) for s in range(5)])
+    assert hi <= 4.5 and hi <= 0.35 * lo
+
+
+def test_print_style_stroke_count_unchanged():
+    assert len(_strokes("minimum", 0.2, 0)) == 17
+
+
+def test_delayed_strokes_drawn_last():
+    st = _strokes("kitten", 0.95, 0)
+    def is_del(s):
+        arc = float(np.sum(np.linalg.norm(np.diff(s, axis=0), axis=1)))
+        return s[:, 1].max() < -0.9 and arc < 0.8
+    is_del_list = [is_del(s) for s in st]
+    assert is_del_list[-3:] == [True, True, True] and not any(is_del_list[:-3])
+
+
+def test_high_join_after_o_and_baseline_join_after_a():
+    f = _Font("cursive")
+    for seed in range(5):
+        rng = np.random.default_rng(seed)
+        r_on = connect_word(f.place_glyphs("on", rng, 0.95, 0.7, None), rng, 0.97)
+        r_an = connect_word(f.place_glyphs("an", rng, 0.95, 0.7, None), rng, 0.97)
+        if r_on.joins:
+            assert r_on.joins[0].point[1] <= -0.85
+        if r_an.joins:
+            assert -0.75 <= r_an.joins[0].point[1] <= -0.40
+
+
+def test_join_turn_angles_bounded_over_corpus():
+    f = _Font("cursive")
+    words = "the quick brown fox jumps over the lazy dog".split()
+    turns = []
+    for seed in range(5):
+        for w in words:
+            rng = np.random.default_rng(seed)
+            r = connect_word(f.place_glyphs(w, rng, 0.95, 0.7, None), rng, 0.97)
+            for j in r.joins:
+                turns.append(j.turn_deg)
+    assert len(turns) > 0
+    assert max(turns) <= 75.0 and np.mean(turns) <= 40.0
+
+
+def test_edge_words_capitals_punctuation_single_letters():
+    for w in ["Hello,", "don't", "A4", "a", "I", ""]:
+        st, width = _Font("cursive")._latin_word_strokes(w, rng=np.random.default_rng(1), connectedness=0.95, neatness=0.7)
+        assert width > 0
+    r = connect_word(_Font("cursive").place_glyphs("Hello,", np.random.default_rng(1), 0.95, 0.7, None), np.random.default_rng(1), 0.97)
+    assert all(j.prev_ch.islower() and j.next_ch.islower() for j in r.joins)

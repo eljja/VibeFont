@@ -33,6 +33,85 @@ class JoinInfo:
     path: np.ndarray | None = None
 
 
+@dataclass
+class ConnectResult:
+    strokes: list[np.ndarray]
+    joins: list[JoinInfo] = field(default_factory=list)
+
+
+HIGH_EXIT = frozenset("bovw")
+
+
+def connect_word(
+    glyphs: list[PlacedGlyph],
+    rng: np.random.Generator,
+    p_join: float,
+    writer_key: int = 0,
+) -> ConnectResult:
+    """Connect lowercase glyphs within a word into continuous cursive strokes."""
+    if not glyphs:
+        return ConnectResult([])
+
+    glyph_bodies: list[tuple[str, list[np.ndarray]]] = []
+    all_delayed: list[np.ndarray] = []
+
+    for g in glyphs:
+        if not g.strokes:
+            continue
+        merged = merge_glyph_internal(g.strokes)
+        anchors = find_anchors(merged)
+        body, delayed = split_delayed(merged, anchors)
+        glyph_bodies.append((g.ch, body))
+        all_delayed.extend(delayed)
+
+    if not glyph_bodies:
+        return ConnectResult(all_delayed)
+
+    accum_strokes: list[np.ndarray] = []
+    joins: list[JoinInfo] = []
+
+    for idx, (ch, body) in enumerate(glyph_bodies):
+        if not body:
+            continue
+
+        if not accum_strokes:
+            accum_strokes.extend([s.copy() for s in body])
+            continue
+
+        prev_ch = glyph_bodies[idx - 1][0]
+        can_join = (
+            prev_ch.islower()
+            and ch.islower()
+            and (rng.random() < p_join)
+            and len(accum_strokes[-1]) >= 2
+            and len(body[0]) >= 2
+        )
+
+        joined = None
+        if can_join:
+            tail_a = accum_strokes[-1]
+            head_b = body[0]
+            meet_y = -0.98 if prev_ch in HIGH_EXIT else None
+            joined = join_strokes(tail_a, head_b, rng, zone=0.20, max_gap=0.55, meet_y=meet_y)
+
+        if joined is not None:
+            j_idx = len(accum_strokes[-1]) - 1
+            turn = turn_angle_deg(joined, j_idx, k=1)
+            if turn <= 75.0:
+                join_pt = (float(joined[j_idx, 0]), float(joined[j_idx, 1]))
+                joins.append(JoinInfo(prev_ch=prev_ch, next_ch=ch, point=join_pt, turn_deg=turn))
+                accum_strokes[-1] = joined
+                if len(body) > 1:
+                    accum_strokes.extend([s.copy() for s in body[1:]])
+            else:
+                accum_strokes.extend([s.copy() for s in body])
+        else:
+            accum_strokes.extend([s.copy() for s in body])
+
+    accum_strokes.extend(all_delayed)
+    return ConnectResult(strokes=accum_strokes, joins=joins)
+
+
 def turn_angle_deg(path: np.ndarray, idx: int, k: int = 3) -> float:
     """Calculate the turning angle in degrees at path[idx] using step k."""
     if len(path) < 3 or idx <= 0 or idx >= len(path) - 1:

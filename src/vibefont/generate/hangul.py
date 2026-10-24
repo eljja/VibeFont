@@ -614,11 +614,11 @@ def syllable_strokes(
 
     if has_jong:
         W = 1.56 * w_sc
-        H = 1.96 * h_sc
+        H = 2.02 * h_sc
         Y_TOP = -0.96 * H
     else:
         W = 1.46 * w_sc
-        H = 1.78 * h_sc
+        H = 1.84 * h_sc
         Y_TOP = -0.98 * H
 
     strokes: list[np.ndarray] = []
