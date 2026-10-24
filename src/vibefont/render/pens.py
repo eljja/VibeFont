@@ -96,12 +96,47 @@ def _curvature_and_downbias(ink: Ink) -> tuple[np.ndarray, np.ndarray]:
     return curv, down
 
 
+def _dwell_pool(ink: Ink, radius_mm: float = 0.25, tau_s: float = 0.25) -> np.ndarray:
+    """Per-point ink pooling based on local dwell time (seconds spent within radius_mm)."""
+    n = len(ink)
+    pool = np.zeros(n, dtype=np.float64)
+    if n == 0:
+        return pool
+
+    for sl in ink.stroke_slices():
+        s = ink.points[sl].astype(np.float64)
+        if len(s) < 2:
+            continue
+        xy = s[:, :2]
+        t = s[:, T]
+        diffs = np.linalg.norm(np.diff(xy, axis=0), axis=1)
+        arc = np.concatenate([[0.0], np.cumsum(diffs)])
+        dt = np.zeros(len(s))
+        if len(t) >= 2:
+            dt[0] = 0.5 * max(t[1] - t[0], 0.0)
+            dt[-1] = 0.5 * max(t[-1] - t[-2], 0.0)
+            if len(t) > 2:
+                dt[1:-1] = 0.5 * np.maximum(t[2:] - t[:-2], 0.0)
+
+        left = np.searchsorted(arc, arc - radius_mm, side="left")
+        right = np.searchsorted(arc, arc + radius_mm, side="right")
+        cum_dt = np.concatenate([[0.0], np.cumsum(dt)])
+        local_t = cum_dt[right] - cum_dt[left]
+
+        # Net pause dwell: excess time spent locally above rapid stroke speed (~0.02s)
+        excess_t = np.maximum(local_t - 0.02, 0.0)
+        pool[sl] = 1.0 - np.exp(-excess_t / tau_s)
+
+    return pool
+
+
 def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generator) -> PenSample:
     n = len(ink)
     p = ink.points[:, P].astype(np.float64) if ink.has_pressure else pseudo_pressure(ink).astype(np.float64)
     p = np.clip(np.nan_to_num(p, nan=0.5), 0.0, 1.0)
     v = _speed_mm_s(ink)
     curv, down = _curvature_and_downbias(ink)
+    pool = _dwell_pool(ink)
     W = pen.width_mm
     start, end = _stroke_ends(ink, 0.75)
     grain, feather = 0.15, 0.0
@@ -124,13 +159,14 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
             start_gate[sl] = -0.38 if rng.random() < 0.30 else (0.70 if rng.random() < 0.25 else 0.0)
         corner_blob = np.clip((curv - 2.2) / 5.0, 0.0, 1.0) * (0.5 + 0.5 * nz)
         dens = np.clip(dens * (1.0 + start * start_gate) + 0.90 * corner_blob, 0.24, 2.4)
+        dens *= 1.0 + 0.30 * pool
         w *= 1.0 + 0.22 * corner_blob
         grain = 0.36
         dry_streak = 0.42
     elif pen.type == "gel":
         taper = np.clip(1.0 + 0.12 * start - 0.48 * end, 0.32, 1.12)
         w = W * (0.72 + 0.36 * p) * taper
-        dens = (0.88 + 0.38 * p) * (1.0 + 0.38 * end + 0.18 * start)
+        dens = (0.88 + 0.38 * p) * (1.0 + 0.38 * end + 0.18 * start) * (1.0 + 0.60 * pool)
         rim_halo = 0.22
         grain = 0.12
     elif pen.type == "fountain":
@@ -139,12 +175,12 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         nib_mod = 0.62 + 0.52 * np.abs(np.sin(th - np.radians(38.0)))
         flex_mod = 0.52 + 0.78 * np.power(p, 1.15) + 0.18 * np.maximum(down, 0)
         taper = np.clip(1.0 + 0.14 * start - 0.52 * end, 0.32, 1.15)
-        w = W * flex_mod * nib_mod * taper
+        w = W * flex_mod * nib_mod * taper * (1.0 + 0.25 * pool)
         # Liquid dye ink shading: translucent in fast mid-strokes, deep dark pooling at slow turns & stroke ends
         v0 = 26.0
         flow = v0 / (v + v0)
         dens = (0.38 + 1.12 * flow) * (0.82 + 0.32 * p)
-        dens *= 1.0 + 0.78 * end + 0.28 * start + 0.25 * np.clip(curv / 4.0, 0, 1)
+        dens *= (1.0 + 0.78 * end + 0.28 * start + 0.25 * np.clip(curv / 4.0, 0, 1)) * (1.0 + 0.90 * pool)
         feather = 0.65
         grain = 0.18
         rim_halo = 0.62
@@ -163,7 +199,7 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         taper = np.clip(1.0 - 0.25 * end, 0.55, 1.05)
         w = W * (0.82 + 0.24 * p) * chisel * taper
         v0 = 45.0
-        dens = (0.48 + 0.42 * (v0 / (v + v0))) * (1.0 + 0.42 * end + 0.20 * start)
+        dens = (0.48 + 0.42 * (v0 / (v + v0))) * (1.0 + 0.42 * end + 0.20 * start) * (1.0 + 0.60 * pool)
         grain = 0.22
         feather = 0.38
         rim_halo = 0.28
