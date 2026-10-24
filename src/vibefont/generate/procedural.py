@@ -23,6 +23,21 @@ from .kinematics import densify, strokes_to_ink
 from .ligature import PlacedGlyph, connect_word
 
 
+def position_factor(i: int, n: int) -> float:
+    """Returns looseness multiplier based on character position within a word.
+
+    Word-initial characters are drawn more carefully (0.85), mid-word letters are steady (1.0),
+    and word-final characters exhibit looser cursive exit flourishes (1.30).
+    """
+    if n <= 1:
+        return 1.0
+    if i == 0:
+        return 0.85
+    if i == n - 1 and n >= 3:
+        return 1.30
+    return 1.0
+
+
 class _Font:
     def __init__(self, name: str):
         from HersheyFonts import HersheyFonts  # optional dependency: pip install Hershey-Fonts
@@ -62,7 +77,10 @@ class _Font:
 
         placed_glyphs: list[PlacedGlyph] = []
         cursor_x = 0.0
-        for ch in word:
+        n_chars = len(word)
+        for i, ch in enumerate(word):
+            pos_mult = position_factor(i, n_chars)
+            eff_clumsy = clumsy * pos_mult
             ch_raw = [np.asarray(s, np.float64) for s in self.f.strokes_for_text(ch) if len(s)]
             if not ch_raw:
                 cursor_x += 0.35
@@ -76,10 +94,10 @@ class _Font:
             cw = max(max_nx - min_nx, 0.18)
 
             # Clean per-character proportion variation without CAPTCHA-like warping
-            sx = prof_w * float(np.clip(np.exp(rng.normal(0.0, 0.038 * clumsy)), 0.90, 1.12))
-            sy = prof_h * float(np.clip(np.exp(rng.normal(0.0, 0.038 * clumsy)), 0.90, 1.12))
-            dy = float(np.clip(rng.normal(0.0, 0.018 * clumsy), -0.05, 0.05))
-            d_slant = float(np.tan(np.radians(np.clip(rng.normal(0.0, 1.2 * clumsy), -3.0, 3.0))))
+            sx = prof_w * float(np.clip(np.exp(rng.normal(0.0, 0.038 * eff_clumsy)), 0.90, 1.12))
+            sy = prof_h * float(np.clip(np.exp(rng.normal(0.0, 0.038 * eff_clumsy)), 0.90, 1.12))
+            dy = float(np.clip(rng.normal(0.0, 0.018 * eff_clumsy), -0.05, 0.05))
+            d_slant = float(np.tan(np.radians(np.clip(rng.normal(0.0, 1.2 * eff_clumsy), -3.0, 3.0))))
 
             ch_placed: list[np.ndarray] = []
             for s in norm_c:
@@ -88,11 +106,11 @@ class _Font:
                 px = px - d_slant * py + cursor_x
                 ch_placed.append(np.stack([px, py], axis=1))
 
-            jitter = float(abs(np.log(sx)) + abs(np.log(sy)) + abs(dy) + abs(d_slant))
+            jitter = float(abs(np.log(sx / prof_w)) + abs(np.log(sy / prof_h)) + abs(dy) + abs(d_slant))
             placed_glyphs.append(PlacedGlyph(ch=ch, strokes=ch_placed, jitter=jitter))
 
             actual_max_x = max(float(s[:, 0].max()) for s in ch_placed)
-            kern_jitter = float(np.clip(rng.normal(0.0, 0.018 * clumsy), -0.04, 0.05))
+            kern_jitter = float(np.clip(rng.normal(0.0, 0.018 * eff_clumsy), -0.04, 0.05))
             kern_base = 0.01 if connectedness >= 0.4 else (0.24 if cw < 0.25 else 0.20)
             cursor_x = max(cursor_x + 0.20, actual_max_x + max(0.0, kern_base + kern_jitter))
 
@@ -175,16 +193,19 @@ class _Font:
 
         for is_h, text in runs:
             if is_h:
-                for ch in text:
+                n_text = len(text)
+                for idx_ch, ch in enumerate(text):
+                    pos_mult = position_factor(idx_ch, n_text)
+                    eff_clumsy = clumsy * pos_mult
                     ch_strokes = hangul_char_strokes(ch, rng=rng, connectedness=connectedness, neatness=neatness, profile=profile)
                     if ch_strokes:
                         ch_pts = np.concatenate(ch_strokes, axis=0)
                         ch_x0 = float(ch_pts[:, 0].min())
                         ch_w = float(ch_pts[:, 0].max() - ch_x0)
-                        sy_jit = float(np.clip(np.exp(rng.normal(0.0, 0.026 * clumsy)), 0.91, 1.07)) if rng is not None else 1.0
-                        sx_jit = float(np.clip(np.exp(rng.normal(0.0, 0.035 * clumsy)), 0.89, 1.12)) if rng is not None else 1.0
-                        dy_jit = float(np.clip(rng.normal(0.0, 0.018 * clumsy), -0.05, 0.05)) if rng is not None else 0.0
-                        rot_jit = float(np.radians(np.clip(rng.normal(0.0, 1.0 * clumsy), -2.4, 2.4))) if rng is not None else 0.0
+                        sy_jit = float(np.clip(np.exp(rng.normal(0.0, 0.026 * eff_clumsy)), 0.91, 1.07)) if rng is not None else 1.0
+                        sx_jit = float(np.clip(np.exp(rng.normal(0.0, 0.035 * eff_clumsy)), 0.89, 1.12)) if rng is not None else 1.0
+                        dy_jit = float(np.clip(rng.normal(0.0, 0.018 * eff_clumsy), -0.05, 0.05)) if rng is not None else 0.0
+                        rot_jit = float(np.radians(np.clip(rng.normal(0.0, 1.0 * eff_clumsy), -2.4, 2.4))) if rng is not None else 0.0
                         c_r, s_r = np.cos(rot_jit), np.sin(rot_jit)
                         for s in ch_strokes:
                             sp = s.copy()
@@ -193,7 +214,7 @@ class _Font:
                             rx = c_r * px - s_r * py + cursor_x
                             ry = s_r * px + c_r * py + dy_jit
                             all_strokes.append(np.stack([rx, ry], axis=1))
-                        gap_jit = float(np.clip(rng.normal(0.0, 0.022 * clumsy), -0.05, 0.06)) if rng is not None else 0.0
+                        gap_jit = float(np.clip(rng.normal(0.0, 0.022 * eff_clumsy), -0.05, 0.06)) if rng is not None else 0.0
                         cursor_x += max(ch_w * sx_jit, 1.24) + max(0.08, gap + gap_jit)
                     else:
                         cursor_x += 0.9
