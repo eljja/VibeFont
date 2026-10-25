@@ -21,7 +21,7 @@ import numpy as np
 from ..document.layout import Page, page_size
 from ..ink import EOS, NCOLS, P, T, X, Y, Ink
 from ..vibe.spec import VibeSpec
-from .glyph_guard import validate_text_glyphs
+from .glyph_guard import MissingGlyphError, validate_text_glyphs
 from .hangul import WriterProfile, _curve, hangul_char_strokes, is_hangul, sample_writer_profile
 from .kinematics import densify
 from .procedural import ProceduralGenerator
@@ -418,8 +418,7 @@ def compose_calligraphy_page(
                         w_st, _ = script_font.word(ch, rng=rng, connectedness=0.0, neatness=0.88, profile=profile)
                         sculpted = [(s, 0.70, False) for s in w_st]
                     if not sculpted:
-                        cursor_x += 0.9 * sc
-                        continue
+                        raise MissingGlyphError(ch, text=text)
                     all_p = np.concatenate([p for p, _, _ in sculpted], axis=0)
                     x0 = float(all_p[:, 0].min())
                     ch_w = max(float(all_p[:, 0].max() - x0), 0.20)
@@ -450,8 +449,7 @@ def compose_calligraphy_page(
                             w_st, _ = script_font.word(ch, rng=rng, connectedness=0.0, neatness=0.88, profile=profile)
                             sculpted = [(s, 0.70, False) for s in w_st]
                         if not sculpted:
-                            cursor_x += 0.5 * sc
-                            continue
+                            raise MissingGlyphError(ch, text=text)
                         all_p = np.concatenate([p for p, _, _ in sculpted], axis=0)
                         x0 = float(all_p[:, 0].min())
                         ch_w = max(float(all_p[:, 0].max() - x0), 0.20)
@@ -478,8 +476,7 @@ def compose_calligraphy_page(
                 s_weight = 0.76 if is_func else (1.05 if is_hero_w else 0.92)
                 w_strokes, _ = script_font.word(word, rng=rng, connectedness=0.92, neatness=0.88, profile=profile)
                 if not w_strokes:
-                    cursor_x += 0.8 * sc
-                    continue
+                    raise MissingGlyphError(word, text=text)
                 slant_k = np.tan(np.radians(16.0))
                 word_dy = float(rng.uniform(-0.05, 0.05))
                 placed_w: list[np.ndarray] = []
@@ -611,5 +608,30 @@ def compose_calligraphy_page(
                 span_w_mm=min(80.0, (xmax - xmin) * 0.72),
             )
             page.lines.append(_strokes_to_calligraphy_ink(fl_strokes, text="", has_ko=False))
+
+    # 5. Strict post-generation glyph integrity verification
+    rendered_glyphs = [g["ch"] for lg in all_line_glyphs for g in lg]
+    if has_ko:
+        expected_chars = [c for c in text if not c.isspace()]
+        if rendered_glyphs != expected_chars:
+            missing = [c for c in expected_chars if c not in rendered_glyphs]
+            raise MissingGlyphError(
+                f"Calligraphy integrity check failed: expected {expected_chars}, got {rendered_glyphs}. Missing: {missing}",
+                text=text,
+            )
+    else:
+        expected_words = text.split()
+        if rendered_glyphs != expected_words:
+            missing = [w for w in expected_words if w not in rendered_glyphs]
+            raise MissingGlyphError(
+                f"Calligraphy integrity check failed: expected {expected_words}, got {rendered_glyphs}. Missing: {missing}",
+                text=text,
+            )
+
+    for ln in page.lines:
+        for g in ln.meta.get("glyphs", []):
+            i0, i1 = g["strokes"]
+            if i1 <= i0:
+                raise MissingGlyphError(f"Glyph {g['ch']!r} registered with 0 strokes", text=text)
 
     return page

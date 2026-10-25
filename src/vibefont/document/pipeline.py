@@ -11,6 +11,7 @@ import numpy as np
 
 from ..descriptors import slant_deg
 from ..generate.base import LineRequest, StrokeGenerator
+from ..generate.glyph_guard import MissingGlyphError, validate_text_glyphs
 from ..ink import Ink
 from ..vibe.spec import VibeSpec
 from .drift import DocumentDrift, LineState
@@ -38,6 +39,7 @@ def _place(ink: Ink, spec: VibeSpec, st: LineState, x_mm: float, y_mm: float,
 def write_document(text: str, spec: VibeSpec, gen: StrokeGenerator, rng: np.random.Generator | None = None,
                    max_pages: int = 20) -> list[Page]:
     text = text.replace("\\n", "\n")
+    text = validate_text_glyphs(text, allow_hangul=True)
     rng = rng or np.random.default_rng(spec.seed)
     w_mm, h_mm = page_size(spec)
     top, right, bottom, left = spec.layout.margin_mm
@@ -101,6 +103,16 @@ def write_document(text: str, spec: VibeSpec, gen: StrokeGenerator, rng: np.rand
                 ymax = max(ln.bbox()[3] for ln in non_empty)
                 dy = 0.5 * page.height_mm - 0.5 * (ymin + ymax)
                 page.lines = [ln.translate(0.0, dy) for ln in page.lines]
+
+    # Strict post-generation word verification: verify no words were dropped
+    placed_words = [w for p in pages for ln in p.lines for w in getattr(ln, "text", "").split()]
+    expected_words = text.split()
+    if placed_words != expected_words:
+        raise MissingGlyphError(
+            f"Document word integrity violation: expected {len(expected_words)} words, placed {len(placed_words)}.",
+            text=text,
+        )
+
     return pages
 
 

@@ -135,3 +135,61 @@ def test_model_generator_never_truncates_trailing_characters(monkeypatch):
     out = gen.generate_line(LineRequest(text, spec.style, st, np.random.default_rng(1)))
     assert len(out) == len(base)
     assert out.xy[:, 0].max() >= base.xy[:, 0].max() - 0.3
+
+
+def test_interpreter_preserves_fountain_pen_in_calligraphy():
+    from vibefont.vibe.interpreter import interpret
+
+    spec = interpret("아이보리 엽서에 블루블랙 만년필로 정성스럽게 쓴 캘리그라피")
+    assert spec.pen.type == "fountain"
+    assert spec.paper.type == "ivory"
+
+
+def test_fountain_pen_calligraphy_renders_with_rich_flex_and_shading():
+    from vibefont.render.pens import pen_samples
+    from vibefont.render.raster import render_page
+    from vibefont.vibe.spec import InkSpec, PaperSpec, StyleSpec
+
+    spec = VibeSpec(
+        pen=PenSpec(type="fountain", width_mm=0.65),
+        ink=InkSpec(color=[0.08, 0.12, 0.30]),
+        paper=PaperSpec(type="ivory"),
+        style=StyleSpec(size_mm=4.5),
+    )
+    text = "별을 노래하는 마음으로\n모든 죽어가는 것을\n사랑해야지"
+    page = compose_calligraphy_page(text, spec, rng=np.random.default_rng(702))
+    assert len(page.lines) == 3
+
+    # Check 100% glyph integrity
+    recs = _glyph_records(page)
+    expected = [c for c in text if not c.isspace()]
+    assert [g["ch"] for _, g in recs] == expected
+
+    # Verify pen dynamics: flex nib produces > 3x width modulation and liquid shading
+    ps = pen_samples(page.lines[0], spec.pen, spec.style, np.random.default_rng(702))
+    assert ps.width_mm.max() > 2.5 * ps.width_mm.min()
+    assert ps.dens.max() > 1.8 * ps.dens.min()
+    assert ps.feather > 0.4
+    assert ps.rim_halo > 0.4
+
+    # Render image and confirm non-empty
+    img = render_page(page, spec, dpi=150, rng=np.random.default_rng(702))
+    assert img.width > 500 and img.height > 500
+
+
+def test_write_document_validates_text_and_prevents_dropped_words():
+    from vibefont.document.pipeline import write_document
+    from vibefont.generate.glyph_guard import MissingGlyphError
+    from vibefont.generate.procedural import ProceduralGenerator
+
+    gen = ProceduralGenerator()
+    spec = VibeSpec()
+
+    # Unsupported glyph raises immediately
+    with pytest.raises(MissingGlyphError):
+        write_document("안녕하세요 ☃ 반갑습니다", spec, gen)
+
+    # Valid text renders all words
+    pages = write_document("달 밝은 밤에 별을 노래하다", spec, gen)
+    placed_words = [w for p in pages for ln in p.lines for w in getattr(ln, "text", "").split()]
+    assert placed_words == ["달", "밝은", "밤에", "별을", "노래하다"]

@@ -47,7 +47,7 @@ def interpret(prompt: str, base: VibeSpec | None = None) -> VibeSpec:
             if f > 0:
                 if (
                     rule.name == "pen_calligraphy"
-                    and spec.pen.type == "brush"
+                    and spec.pen.type in ("brush", "fountain")
                     and not any(k in clause for k in ("broad nib", "평촉"))
                 ):
                     continue
