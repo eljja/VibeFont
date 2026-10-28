@@ -67,3 +67,68 @@ def strokes_to_ink(strokes: list[np.ndarray], speed: float, rng: np.random.Gener
         t = r[-1, 2] + (0.18 - 0.1 * speed) * float(np.exp(0.3 * rng.standard_normal()))
     pts = np.concatenate(rows) if rows else np.zeros((0, NCOLS))
     return resample_time(Ink(pts.astype(np.float32), text), hz)
+
+
+def ballistic_flourish(
+    start_pt: np.ndarray | list[float],
+    initial_direction: np.ndarray | list[float],
+    length_mm: float,
+    inertia_curvature: float = 0.05,
+    initial_pressure: float = 0.70,
+    terminal_pressure: float = 0.05,
+    initial_speed: float = 1.0,
+    n_pts: int = 20,
+    is_entrance: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Generates a biomechanically realistic ballistic flourish stroke.
+
+    Models arm/wrist rotational inertia and neuromotor ballistic momentum:
+    - Exit swashes: start at start_pt, sweep out along initial_direction, curving naturally
+      due to joint pivot inertia, with speed and pressure decaying smoothly to zero.
+    - Entrance swashes: touch down lightly and accelerate into start_pt, arriving with
+      tangent matching initial_direction.
+
+    Returns:
+        (points: np.ndarray of shape (n_pts, 2), pressures: np.ndarray of shape (n_pts,))
+    """
+    p0 = np.asarray(start_pt, dtype=np.float64)
+    v0 = np.asarray(initial_direction, dtype=np.float64)
+    norm_v = np.linalg.norm(v0)
+    if norm_v < 1e-6:
+        v0 = np.array([1.0, 0.0], dtype=np.float64)
+    else:
+        v0 = v0 / norm_v
+
+    theta_0 = np.arctan2(v0[1], v0[0])
+    u = np.linspace(0.0, 1.0, n_pts)
+    ds = float(length_mm) / max(1, n_pts - 1)
+
+    if not is_entrance:
+        # Exit flourish: travels forward from p0
+        # dtheta/ds = inertia_curvature * (1.0 - 0.25 * u)
+        delta_theta = inertia_curvature * float(length_mm) * (u - 0.125 * (u ** 2))
+        theta = theta_0 + delta_theta
+
+        pts = np.zeros((n_pts, 2), dtype=np.float64)
+        pts[0] = p0
+        for i in range(1, n_pts):
+            pts[i] = pts[i - 1] + ds * np.array([np.cos(theta[i]), np.sin(theta[i])])
+
+        pressures = terminal_pressure + (initial_pressure - terminal_pressure) * ((1.0 - u) ** 1.2)
+    else:
+        # Entrance flourish: traces backward from p0, arriving at p0 with angle theta_0
+        # When moving backward from p0, angle is theta_0 + pi, curving in reverse
+        delta_theta = inertia_curvature * float(length_mm) * (u - 0.125 * (u ** 2))
+        theta_back = theta_0 + np.pi - delta_theta
+
+        pts_back = np.zeros((n_pts, 2), dtype=np.float64)
+        pts_back[0] = p0
+        for i in range(1, n_pts):
+            pts_back[i] = pts_back[i - 1] + ds * np.array([np.cos(theta_back[i]), np.sin(theta_back[i])])
+
+        # Reverse so path ends at p0
+        pts = pts_back[::-1].copy()
+        pressures = terminal_pressure + (initial_pressure - terminal_pressure) * (u ** 1.2)
+
+    return pts.astype(np.float32), pressures.astype(np.float32)
+

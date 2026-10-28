@@ -58,3 +58,45 @@ def test_no_strokes_cross_card_margins():
         assert xs.max() <= page.width_mm - 4.0
         assert ys.min() >= 4.0
         assert ys.max() <= page.height_mm - 4.0
+
+
+def test_ballistic_flourish_kinematics():
+    from vibefont.generate.kinematics import ballistic_flourish
+
+    start = np.array([10.0, 20.0])
+    pts, pressures = ballistic_flourish(
+        start_pt=start,
+        initial_direction=np.array([1.0, 0.2]),
+        length_mm=12.0,
+        inertia_curvature=0.08,
+        n_pts=24,
+    )
+    assert len(pts) == 24
+    assert np.allclose(pts[0], start)
+    # Distance should monotonically increase from start
+    dists = np.linalg.norm(pts - start, axis=1)
+    assert np.all(np.diff(dists) >= 0.0)
+    # Curvature should be continuous and smooth (no sharp angle jumps > 15 deg)
+    diffs = np.diff(pts, axis=0)
+    seg_lens = np.linalg.norm(diffs, axis=1)
+    assert np.all(seg_lens > 1e-4)
+    unit_diffs = diffs / seg_lens[:, None]
+    dot_products = np.sum(unit_diffs[:-1] * unit_diffs[1:], axis=1)
+    # Cosine of turn angle should be > cos(15 deg) = 0.965
+    assert np.all(dot_products > 0.95)
+    # Exit pressure should decay smoothly towards near-zero
+    assert pressures[0] > pressures[-1]
+    assert pressures[-1] <= 0.15
+
+
+def test_calligraphy_tail_pressure_tapers_smoothly():
+    text = "Freedom and Serenity"
+    spec = VibeSpec(pen=PenSpec(type="fountain"))
+    page = compose_calligraphy_page(text, spec, rng=np.random.default_rng(42))
+    last_line = page.lines[-1]
+    # The last stroke in the line should have a decaying terminal pressure without sudden drop or cliff
+    tail_p = last_line.points[-8:, 3]  # P column is index 3
+    assert tail_p[-1] < 0.25
+    # Smooth decay towards the end
+    assert tail_p[-1] <= tail_p[0]
+

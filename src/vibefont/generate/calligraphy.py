@@ -23,7 +23,7 @@ from ..ink import EOS, NCOLS, P, T, X, Y, Ink
 from ..vibe.spec import VibeSpec
 from .glyph_guard import MissingGlyphError, validate_text_glyphs
 from .hangul import WriterProfile, _curve, hangul_char_strokes, is_hangul, sample_writer_profile
-from .kinematics import densify
+from .kinematics import ballistic_flourish, densify
 from .procedural import ProceduralGenerator
 from .semantics import SemanticArchetype, WordMorphology, analyze_semantics
 
@@ -216,10 +216,14 @@ def _sculpt_ko_syllable_strokes(
             dir_vec = d_end / norm_d
             sweep_dir = np.array([0.35 * dir_vec[0] - 0.12, max(0.75, dir_vec[1])])
             sweep_dir /= np.linalg.norm(sweep_dir)
-            ctrl1 = end_pt + 0.50 * tail_len * sweep_dir
-            ctrl2 = end_pt + tail_len * (sweep_dir + np.array([-0.10, 0.12]))
-            tail_curve = _curve([end_pt.tolist(), ctrl1.tolist(), ctrl2.tolist()], n=12)
-            pts = np.concatenate([pts[:-1], tail_curve], axis=0)
+            tail_pts, _ = ballistic_flourish(
+                start_pt=end_pt,
+                initial_direction=sweep_dir,
+                length_mm=tail_len,
+                inertia_curvature=-0.30 * float(rng.uniform(0.8, 1.2)),
+                n_pts=14,
+            )
+            pts = np.concatenate([pts[:-1], tail_pts], axis=0)
             is_tail = True
 
         out.append((pts, s_weight, is_tail))
@@ -488,18 +492,28 @@ def compose_calligraphy_page(
                     pts = np.stack([px, py], axis=1)
                     if w_idx == 0 and s_i == 0 and len(pts) >= 3:
                         p0 = pts[0]
-                        swash = _curve(
-                            [[p0[0] - 0.70 * sc, p0[1] + 0.26 * sc], [p0[0] - 0.35 * sc, p0[1] - 0.20 * sc], p0.tolist()],
-                            n=14,
+                        d_in = pts[1] - pts[0]
+                        swash_pts, _ = ballistic_flourish(
+                            start_pt=p0,
+                            initial_direction=d_in,
+                            length_mm=0.75 * sc,
+                            inertia_curvature=0.20,
+                            is_entrance=True,
+                            n_pts=14,
                         )
-                        pts = np.concatenate([swash[:-1], pts], axis=0)
+                        pts = np.concatenate([swash_pts[:-1], pts], axis=0)
                     elif w_idx == len(words) - 1 and s_i == len(w_strokes) - 1 and len(pts) >= 3:
                         pe = pts[-1]
-                        swash = _curve(
-                            [pe.tolist(), [pe[0] + 0.46 * sc, pe[1] + 0.16 * sc], [pe[0] + 0.90 * sc, pe[1] - 0.22 * sc]],
-                            n=14,
+                        d_out = pts[-1] - pts[-2]
+                        swash_pts, _ = ballistic_flourish(
+                            start_pt=pe,
+                            initial_direction=d_out + np.array([0.25, -0.15]),
+                            length_mm=0.90 * sc,
+                            inertia_curvature=-0.22,
+                            is_entrance=False,
+                            n_pts=14,
                         )
-                        pts = np.concatenate([pts, swash[1:]], axis=0)
+                        pts = np.concatenate([pts, swash_pts[1:]], axis=0)
                     placed_w.append(pts)
                     is_tail = (w_idx == len(words) - 1 and s_i == len(w_strokes) - 1)
                     line_strokes_norm.append((pts, s_weight, is_tail))
