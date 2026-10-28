@@ -29,6 +29,9 @@ class PenSample:
     dry_streak: float = 0.0  # 0..1: transverse bristle striations (brush) or ballpoint tracks
     porous_threshold: float = 0.0  # 0..1: paper valley threshold where dry media (pencil) skips
     dryness: np.ndarray | None = None  # (N,) per-point dry-brush / skip intensity in [0, 1]
+    tine_split: float = 0.0  # 0..1: flex fountain pen tine separation rail tracks
+    graphite_shear: float = 0.0  # 0..1: particulate graphite shearing onto tooth peaks
+    ball_rim_paste: float = 0.0  # 0..1: ballpoint margin paste ridges
 
 
 def _speed_mm_s(ink: Ink) -> np.ndarray:
@@ -205,6 +208,7 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
     grain, feather = 0.15, 0.0
     rim_halo, dry_streak, porous_threshold = 0.0, 0.0, 0.0
     dryness = np.zeros(n, dtype=np.float64)
+    tine_split, graphite_shear, ball_rim_paste = 0.0, 0.0, 0.0
 
     if pen.type == "ballpoint":
         goop_blob, ball_skip = _ballpoint_goop(ink, rng)
@@ -225,6 +229,7 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         w *= 1.0 + 0.22 * np.clip(goop_blob, 0.0, 1.0)
         grain = 0.36
         dry_streak = 0.42
+        ball_rim_paste = 0.65
     elif pen.type == "gel":
         taper = np.clip(1.0 + 0.12 * start - 0.48 * end, 0.32, 1.12)
         w = W * (0.72 + 0.36 * p) * taper
@@ -246,6 +251,7 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         feather = 0.65
         grain = 0.18
         rim_halo = 0.62
+        tine_split = float(np.clip((np.mean(p) - 0.60) / 0.35, 0.0, 1.0) * 0.75)
     elif pen.type == "pencil":
         # Graphite lead: directional pressure shading + porous paper tooth valleys
         taper = np.clip(1.0 - 0.36 * end, 0.45, 1.05)
@@ -256,6 +262,7 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         grain = 1.0
         porous_threshold = 0.40
         dryness = np.clip(0.58 - 0.45 * p, 0.08, 0.58)
+        graphite_shear = 0.82
     elif pen.type == "marker":
         chisel = 0.78 + 0.32 * np.abs(np.sin(_direction(ink) - np.radians(25.0)))
         taper = np.clip(1.0 - 0.25 * end, 0.55, 1.05)
@@ -304,4 +311,7 @@ def pen_samples(ink: Ink, pen: PenSpec, style: StyleSpec, rng: np.random.Generat
         dry_streak=dry_streak,
         porous_threshold=porous_threshold,
         dryness=dryness,
+        tine_split=tine_split,
+        graphite_shear=graphite_shear,
+        ball_rim_paste=ball_rim_paste,
     )

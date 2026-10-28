@@ -56,6 +56,10 @@ def stamp_stroke(
     dens: np.ndarray,
     dryness: np.ndarray | None = None,
     dry_streak: float = 0.0,
+    tine_split: float = 0.0,
+    graphite_shear: float = 0.0,
+    ball_rim_paste: float = 0.0,
+    tooth: np.ndarray | None = None,
 ) -> tuple[int, int, np.ndarray] | None:
     """Add one stroke (pixel coords, radius px, density) into density buffer D in place.
 
@@ -98,9 +102,26 @@ def stamp_stroke(
         dy = iy + 0.5 - cy
         dist = np.hypot(dx, dy)
         cov = np.clip(rr + 0.5 - dist, 0.0, 1.0)
+        u_perp = (dx * nx + dy * ny) / np.maximum(rr, 0.45)
         if dry_streak > 0.01:
-            u_perp = (dx * nx + dy * ny) / np.maximum(rr, 0.45)
             cov = cov * bristle_striations(u_perp, ddry, dry_streak)
+        if tine_split > 0.02:
+            u_norm = np.clip(u_perp, -1.0, 1.0)
+            rail_profile = 1.0 + tine_split * (
+                1.25 * np.exp(-((np.abs(u_norm) - 0.48) ** 2) / 0.05)
+                - 0.55 * np.exp(-(u_norm ** 2) / 0.04)
+            )
+            cov = cov * np.maximum(0.1, rail_profile)
+        if ball_rim_paste > 0.02:
+            u_norm = np.clip(u_perp, -1.0, 1.0)
+            paste_ridge = 1.0 + ball_rim_paste * (0.65 * np.exp(-((np.abs(u_norm) - 0.72) ** 2) / 0.06))
+            cov = cov * paste_ridge
+        if graphite_shear > 0.02 and tooth is not None:
+            c_ix = np.clip(ix, 0, W - 1)
+            c_iy = np.clip(iy, 0, H - 1)
+            local_t = tooth[c_iy, c_ix]
+            tooth_mod = np.clip((local_t - 0.30) / 0.50, 0.05, 1.35) ** 1.35
+            cov = cov * ((1.0 - graphite_shear) + graphite_shear * tooth_mod)
         cov = (cov * dd).astype(np.float32)
         m = (cov > 0) & (ix >= x0) & (ix < x1) & (iy >= y0) & (iy < y1)
         np.maximum.at(B, (iy[m] - y0, ix[m] - x0), cov[m])
@@ -214,7 +235,18 @@ def render_page(page: Page, spec: VibeSpec, dpi: int = 300, rng: np.random.Gener
         rad = np.maximum(ps.width_mm * px / 2.0, min_rad)
         for sl in ink.stroke_slices():
             sl_dry = ps.dryness[sl] if ps.dryness is not None else None
-            res = stamp_stroke(D, xy[sl], rad[sl], ps.dens[sl], dryness=sl_dry, dry_streak=ps.dry_streak)
+            res = stamp_stroke(
+                D,
+                xy[sl],
+                rad[sl],
+                ps.dens[sl],
+                dryness=sl_dry,
+                dry_streak=ps.dry_streak,
+                tine_split=ps.tine_split,
+                graphite_shear=ps.graphite_shear,
+                ball_rim_paste=ps.ball_rim_paste,
+                tooth=tooth,
+            )
             if res is not None and is_liquid and Tm is not None:
                 y0, x0, B = res
                 y1 = y0 + B.shape[0]
