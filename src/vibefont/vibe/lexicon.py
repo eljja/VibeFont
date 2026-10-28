@@ -93,6 +93,16 @@ RULES: list[Rule] = [
     Rule("diary", ("일기", "다이어리", "노트", "diary", "journal", "notebook"),
          {}, {"paper": {"type": "ruled"}}),
     Rule("exam", ("시험", "답안", "exam", "answer sheet"), {"speed": 0.2}, {"paper": {"type": "ruled"}}),
+    # -------------------------------------------------------- allograph personas
+    Rule("persona_gosi", ("고시체", "수험생", "사시체", "속기", "shorthand"),
+         {"connectedness": 0.45, "speed": 0.40, "neatness": 0.10, "slant_deg": 6.0},
+         {"style": {"archetype": "gosi"}}),
+    Rule("persona_jeongja", ("정갈한 정자체", "정자체", "교과서체", "훈민정음체", "궁서체", "formal upright"),
+         {"connectedness": -0.40, "neatness": 0.35, "consistency": 0.30, "roundness": -0.30, "slant_deg": -6.0},
+         {"style": {"archetype": "classic_jeongja"}}),
+    Rule("persona_diary", ("둥근 다이어리", "다이어리체", "동글동글", "동글이", "손글씨 다이어리", "bubbly diary", "rounded diary"),
+         {"roundness": 0.45, "connectedness": -0.15, "neatness": 0.25, "size_mm": 0.50, "width_scale": 0.15},
+         {"style": {"archetype": "rounded_diary"}, "paper": {"type": "ruled"}}),
     # ----------------------------------------------------------------- pens
     Rule("pen_fountain", ("만년필", "fountain"), {"connectedness": 0.1},
          {"pen": {"type": "fountain", "width_mm": 0.55}}),

@@ -30,6 +30,7 @@ class StyleSpec:
     baseline_wobble: float = 0.3
     consistency: float = 0.6  # 0 drifts a lot over the page .. 1 very steady
     fatigue: float = 0.2  # how much the writing loosens toward the end of the document
+    archetype: str = "standard"  # handwriting skeletal archetype / persona
 
 
 @dataclass

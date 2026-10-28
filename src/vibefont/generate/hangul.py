@@ -44,6 +44,9 @@ WRITER_ARCHETYPES = (
     "bold_head",
     "upward_flow",
     "compact_loose",
+    "gosi",
+    "classic_jeongja",
+    "rounded_diary",
 )
 
 
@@ -70,11 +73,41 @@ def sample_writer_profile(
     if rng is None:
         return WriterProfile()
 
-    arch = str(rng.choice(WRITER_ARCHETYPES))
+    if style is not None and getattr(style, "archetype", "standard") in WRITER_ARCHETYPES and style.archetype != "standard":
+        arch = style.archetype
+    else:
+        arch = str(rng.choice(WRITER_ARCHETYPES))
     conn = style.connectedness if style is not None else 0.5
     rnd = style.roundness if style is not None else 0.5
 
-    if arch == "tall_slender":
+    if arch == "gosi":
+        w_sc = float(rng.uniform(0.92, 1.04))
+        h_sc = float(rng.uniform(0.96, 1.06))
+        cho_sc = float(rng.uniform(0.94, 1.06))
+        jong_sc = float(rng.uniform(0.90, 1.04))
+        h_tilt = float(rng.uniform(0.08, 0.16))
+        s_bend = float(rng.uniform(0.01, 0.06))
+        loop_r = float(rng.uniform(0.82, 0.96))
+        allo_bias = 0.95
+    elif arch == "classic_jeongja":
+        w_sc = float(rng.uniform(0.96, 1.02))
+        h_sc = float(rng.uniform(0.98, 1.03))
+        cho_sc = float(rng.uniform(0.98, 1.04))
+        jong_sc = float(rng.uniform(0.96, 1.04))
+        h_tilt = 0.0
+        s_bend = 0.0
+        loop_r = 1.0
+        allo_bias = 0.05
+    elif arch == "rounded_diary":
+        w_sc = float(rng.uniform(1.12, 1.25))
+        h_sc = float(rng.uniform(0.90, 0.98))
+        cho_sc = float(rng.uniform(1.10, 1.22))
+        jong_sc = float(rng.uniform(1.05, 1.18))
+        h_tilt = float(rng.uniform(-0.02, 0.04))
+        s_bend = float(rng.uniform(-0.02, 0.04))
+        loop_r = float(rng.uniform(1.28, 1.48))
+        allo_bias = 0.40
+    elif arch == "tall_slender":
         w_sc = float(rng.uniform(0.75, 0.85))
         h_sc = float(rng.uniform(1.04, 1.12))
         cho_sc = float(rng.uniform(0.92, 1.04))
@@ -189,7 +222,9 @@ def _ellipse_strokes(
     span_ang = 2.04 * np.pi
     skew = 0.02
     if profile is not None:
-        rx *= float(np.clip(profile.loop_roundness, 0.88, 1.14))
+        lr = float(np.clip(profile.loop_roundness, 0.70, 1.65))
+        rx *= lr
+        ry *= min(lr, 1.40)
     if rng is not None:
         start_ang += float(rng.uniform(-0.22 * np.pi, 0.18 * np.pi))
         span_ang = float(rng.uniform(1.95 * np.pi, 2.12 * np.pi))
@@ -212,10 +247,20 @@ def choseong_strokes(
 ) -> list[np.ndarray]:
     """Returns list of smooth curved (M, 2) strokes in normalized [0, 1] x [0, 1] box with legible allographs."""
     ht = float(np.clip(profile.horiz_tilt if profile is not None else 0.04, -0.02, 0.09))
+    arch = profile.archetype if profile is not None else "standard"
     roll = float(rng.random()) if rng is not None else 0.5
     jit = 0.018 if rng is not None else 0.0
 
     if idx == 0:  # ㄱ: 2 clean allographs (crisp corner vs gently arched downstroke)
+        if arch == "classic_jeongja":
+            return [
+                _curve([[0.08, 0.14], [0.86, 0.14]], 8, rng, 0.0),
+                _curve([[0.86, 0.14], [0.86, 0.90]], 10, rng, 0.0),
+            ]
+        if arch == "gosi":
+            return [_curve([[0.06, 0.16], [0.88, 0.10 - ht], [0.72, 0.92]], 14, rng, jit)]
+        if arch == "rounded_diary":
+            return [_curve([[0.10, 0.18], [0.50, 0.14], [0.84, 0.20], [0.82, 0.56], [0.72, 0.88]], 15, rng, jit)]
         if roll < 0.50:
             return [_curve([[0.08, 0.16], [0.86, 0.12 - ht], [0.76, 0.90]], 14, rng, jit)]
         return [_curve([[0.06, 0.18], [0.50, 0.12 - 0.5 * ht], [0.88, 0.12 - ht], [0.82, 0.54], [0.68, 0.92]], 15, rng, jit)]
@@ -224,10 +269,22 @@ def choseong_strokes(
         s2 = _curve([[0.52, 0.16], [0.94, 0.11 - ht], [0.92, 0.55], [0.83, 0.92]], 12, rng, jit)
         return [s1, s2]
     elif idx == 2:  # ㄴ: 2 clean allographs (standard L vs softly scooped bottom)
+        if arch == "classic_jeongja":
+            return [
+                _curve([[0.16, 0.08], [0.16, 0.88]], 10, rng, 0.0),
+                _curve([[0.16, 0.88], [0.92, 0.88]], 9, rng, 0.0),
+            ]
         if roll < 0.55:
             return [_curve([[0.16, 0.08], [0.13, 0.56], [0.15, 0.88], [0.54, 0.90], [0.92, 0.85 - ht]], 14, rng, jit)]
         return [_curve([[0.18, 0.08], [0.12, 0.78], [0.36, 0.91], [0.92, 0.83 - ht]], 14, rng, jit)]
     elif idx == 3:  # ㄷ: always 2 strokes so it is never confused with ㄹ
+        if arch == "classic_jeongja":
+            return [
+                _curve([[0.12, 0.14], [0.88, 0.14]], 8, rng, 0.0),
+                _curve([[0.14, 0.14], [0.14, 0.88], [0.90, 0.88]], 12, rng, 0.0),
+            ]
+        if arch == "gosi":
+            return [_curve([[0.12, 0.14], [0.86, 0.11 - ht], [0.14, 0.48], [0.12, 0.88], [0.90, 0.85 - ht]], 14, rng, jit)]
         return [
             _curve([[0.13, 0.15], [0.52, 0.11 - 0.5 * ht], [0.89, 0.09 - ht]], 10, rng, jit),
             _curve([[0.16, 0.15], [0.13, 0.56], [0.15, 0.89], [0.54, 0.90], [0.92, 0.85 - ht]], 14, rng, jit),
@@ -240,6 +297,14 @@ def choseong_strokes(
             _curve([[0.56, 0.15], [0.54, 0.88], [0.95, 0.86 - ht]], 12, rng, jit),
         ]
     elif idx == 5:  # ㄹ: 3-stroke print vs 2-stroke natural handwriting
+        if arch == "classic_jeongja":
+            return [
+                _curve([[0.10, 0.14], [0.86, 0.14], [0.86, 0.46]], 10, rng, 0.0),
+                _curve([[0.14, 0.46], [0.86, 0.46]], 8, rng, 0.0),
+                _curve([[0.14, 0.46], [0.14, 0.88], [0.88, 0.88]], 10, rng, 0.0),
+            ]
+        if arch == "gosi":
+            return [_curve([[0.08, 0.14], [0.88, 0.10 - ht], [0.82, 0.46], [0.12, 0.50], [0.14, 0.88], [0.92, 0.84 - ht]], 16, rng, jit)]
         if connectedness < 0.35 or (connectedness < 0.78 and roll < 0.45):
             return [
                 _curve([[0.08, 0.15], [0.87, 0.10 - ht], [0.85, 0.46]], 11, rng, jit),
@@ -251,6 +316,16 @@ def choseong_strokes(
             _curve([[0.14, 0.48], [0.12, 0.89], [0.54, 0.90], [0.93, 0.85 - ht]], 12, rng, jit),
         ]
     elif idx == 6:  # ㅁ: 3-stroke crisp box vs 2-stroke box (never a circle)
+        if arch == "classic_jeongja":
+            return [
+                _curve([[0.14, 0.14], [0.14, 0.88]], 8, rng, 0.0),
+                _curve([[0.14, 0.14], [0.86, 0.14], [0.86, 0.88]], 12, rng, 0.0),
+                _curve([[0.14, 0.88], [0.86, 0.88]], 8, rng, 0.0),
+            ]
+        if arch == "gosi":
+            return [_curve([[0.14, 0.18], [0.12, 0.86], [0.86, 0.86], [0.86, 0.16], [0.16, 0.16]], 14, rng, jit)]
+        if arch == "rounded_diary":
+            return [_ellipse_strokes(0.50, 0.50, 0.38, 0.36, 16, rng=rng, profile=profile)]
         if roll < 0.50:
             return [
                 _curve([[0.14, 0.13], [0.13, 0.89]], 9, rng, jit),
@@ -262,6 +337,13 @@ def choseong_strokes(
             _curve([[0.14, 0.14], [0.86, 0.11 - ht], [0.84, 0.88], [0.15, 0.89]], 15, rng, jit),
         ]
     elif idx == 7:  # ㅂ: always clean 4-stroke or 3-stroke with clear vertical posts
+        if arch == "classic_jeongja":
+            return [
+                _curve([[0.16, 0.08], [0.16, 0.90]], 9, rng, 0.0),
+                _curve([[0.84, 0.08], [0.84, 0.90]], 9, rng, 0.0),
+                _curve([[0.16, 0.48], [0.84, 0.48]], 7, rng, 0.0),
+                _curve([[0.16, 0.89], [0.84, 0.89]], 7, rng, 0.0),
+            ]
         return [
             _curve([[0.16, 0.08], [0.14, 0.52], [0.16, 0.90]], 10, rng, jit),
             _curve([[0.84, 0.08], [0.85, 0.52], [0.82, 0.90]], 10, rng, jit),
@@ -289,7 +371,9 @@ def choseong_strokes(
             _curve([[0.68, 0.45], [0.82, 0.68], [0.95, 0.88]], 9, rng, jit),
         ]
     elif idx == 11:  # ㅇ
-        return [_ellipse_strokes(0.50, 0.50, 0.38, 0.39, 18, rng=rng, profile=profile)]
+        rx = 0.44 if arch == "rounded_diary" else 0.38
+        ry = 0.44 if arch == "rounded_diary" else 0.39
+        return [_ellipse_strokes(0.50, 0.50, rx, ry, 18, rng=rng, profile=profile)]
     elif idx == 12:  # ㅈ: 2-stroke standard vs 3-stroke print
         if roll > 0.65:
             return [
@@ -339,6 +423,17 @@ def choseong_strokes(
             _curve([[0.06, 0.89], [0.50, 0.87], [0.94, 0.84 - ht]], 9, rng, jit),
         ]
     elif idx == 18:  # ㅎ: 3 clean allographs (2-stroke connected top cap + circle, or 3-stroke vertical/slanted dot + bar + circle)
+        if arch == "rounded_diary":
+            return [
+                _curve([[0.48, 0.04], [0.52, 0.16]], 6, rng, jit),
+                _curve([[0.16, 0.22], [0.50, 0.20], [0.84, 0.22]], 8, rng, jit),
+                _ellipse_strokes(0.50, 0.62, 0.38, 0.34, 18, rng=rng, profile=profile),
+            ]
+        if arch == "gosi":
+            return [
+                _curve([[0.48, 0.04], [0.50, 0.18], [0.10, 0.24], [0.90, 0.18 - ht]], 12, rng, jit),
+                _ellipse_strokes(0.50, 0.64, 0.34, 0.28, 16, rng=rng, profile=profile),
+            ]
         if roll < 0.36:
             return [
                 _curve([[0.48, 0.02], [0.48, 0.19], [0.08, 0.24], [0.92, 0.19 - ht]], 12, rng, jit),
@@ -668,6 +763,8 @@ def syllable_strokes_with_joins(
 
     has_jong = f_idx > 0
     eff_conn = connectedness if profile is None else float(np.clip(0.6 * connectedness + 0.4 * profile.allograph_bias, 0.0, 1.0))
+    if profile is not None and profile.archetype == "classic_jeongja":
+        eff_conn = 0.0
     c_st = choseong_strokes(c_idx, rng=rng, connectedness=eff_conn, profile=profile)
     j_st = jungseong_strokes(j_idx, connectedness=eff_conn, rng=rng, profile=profile)
     f_st = jongseong_strokes(f_idx, rng=rng, connectedness=eff_conn, profile=profile)
