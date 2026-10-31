@@ -145,51 +145,77 @@ def generate_microphysics_comparison(out_dir: Path, brain_dir: Path) -> Path:
 
 
 def generate_allograph_persona_comparison(out_dir: Path, brain_dir: Path) -> Path:
-    """Renders identical literary text across 4 distinct handwriting personas
+    """Renders identical literary text across 6 distinct handwriting personas
 
-    and composes a side-by-side comparison board.
+    (including the new Master Heullim and Spencerian penmanship) and composes a side-by-side board.
     """
-    text = (
+    text_ko = (
         "바람이 머물다 간 자리마다\n"
         "푸른 별의 기억이 고요히 피어난다"
+    )
+    text_en = (
+        "In the deepest silence\n"
+        "the clearest wisdom quietly awakens"
     )
 
     personas = [
         {
             "id": "persona_01_gosi",
-            "name": "고시체 (Gosi Cursive Shorthand)",
-            "subtitle": "실제 수험생·법조인의 초고속 속기 필적",
-            "desc": "단일 획 연속 Z-ㄹ, 한붓그리기 타원 ㅁ, 신속한 우상향 기울기와 유려한 어간 연결",
+            "name": "1. 자유분방 속기체 (Casual Gosi Cursive)",
+            "subtitle": "수험생·실무자의 거침없고 빠른 실전 필적",
+            "desc": "단일 획 연속 Z-ㄹ, 한붓그리기 타원 ㅁ, 신속한 우상향 기울기와 자유분방한 어간 흐름",
             "prompt": "고시체 수험생 속기 필기 남색 만년필",
             "seed": 881,
+            "text": text_ko,
         },
         {
-            "id": "persona_02_jeongja",
-            "name": "정갈한 정자체 (Classic Jeongja Formal)",
-            "subtitle": "교과서·궁서 기반의 반듯한 직교 정자",
-            "desc": "90도 각진 모서리 일시멈춤, 4획 독립 ㅂ, 3획 ㅁ, 칼같이 단정한 직립 기하학",
-            "prompt": "정갈한 정자체 교과서처럼 반듯하게 검정 볼펜",
-            "seed": 882,
-        },
-        {
-            "id": "persona_03_diary",
-            "name": "둥근 다이어리체 (Bubbly Diary Cute)",
+            "id": "persona_02_diary",
+            "name": "2. 둥근 다이어리체 (Bubbly Diary Cute)",
             "subtitle": "소녀 감성의 동글동글 아기자기 손글씨",
             "desc": "특대형 개방 원형 ㅇ/ㅎ, 둥근 모서리 ㅁ, 리듬감 있는 통통한 글자 비례와 줄노트 배치",
             "prompt": "둥근 다이어리체 동글동글 아기자기하게 초록 젤펜",
             "seed": 883,
+            "text": text_ko,
         },
         {
-            "id": "persona_04_calli",
-            "name": "명필 캘리그라피 (Master Calligraphy)",
-            "subtitle": "단어 의미를 형상화한 수묵 캘리그라피",
+            "id": "persona_03_jeongja",
+            "name": "3. 정갈한 정자체 (Classic Jeongja Formal)",
+            "subtitle": "교과서·궁서 기반의 반듯한 직교 정자",
+            "desc": "90도 각진 모서리 일시멈춤, 4획 독립 ㅂ, 3획 ㅁ, 칼같이 단정한 직립 기하학",
+            "prompt": "정갈한 정자체 교과서처럼 반듯하게 검정 볼펜",
+            "seed": 882,
+            "text": text_ko,
+        },
+        {
+            "id": "persona_04_master_heullim",
+            "name": "4. 명필 정통 흘림체 (Master Heullim Virtuoso) ★",
+            "subtitle": "누가 봐도 감탄하는 품격과 절제된 미학의 궁체 흘림",
+            "desc": "우아한 S자 곡선 3단 굽이침 ㄹ, 단아한 2획 ㅁ, 절제된 기필과 유려한 연맥, 완벽한 균형미",
+            "prompt": "명필 흘림체로 아주 유려하고 품격 있게 쓴 편지 남색 만년필",
+            "seed": 885,
+            "text": text_ko,
+        },
+        {
+            "id": "persona_05_calli",
+            "name": "5. 수묵 캘리그라피 (Artistic Calligraphy)",
+            "subtitle": "단어 의미를 형상화한 수묵 붓글씨",
             "desc": "어간/조사 계층 구조, 횡세종태, 생체역학적 관성 삐침(Ballistic Flourish), 전각 낙관",
             "prompt": "명필 캘리그라피 붓펜 먹색",
             "seed": 884,
+            "text": text_ko,
+        },
+        {
+            "id": "persona_06_spencerian",
+            "name": "6. 스펜서리안 명필 영문 (Spencerian Master Hand) ★",
+            "subtitle": "우아한 55도 슬랜트와 섬세한 헤어라인의 정통 명필",
+            "desc": "카퍼플레이트/스펜서리안 타원 곡률 루프, 정교한 헤어라인 업스트로크와 셰이딩 밸런스",
+            "prompt": "명필 영문 필기체 spencerian copperplate virtuoso cursive 만년필",
+            "seed": 886,
+            "text": text_en,
         },
     ]
 
-    card_w, card_h = 600, 480
+    card_w, card_h = 580, 460
     rendered_cards: list[tuple[dict, Image.Image]] = []
 
     for item in personas:
@@ -197,7 +223,7 @@ def generate_allograph_persona_comparison(out_dir: Path, brain_dir: Path) -> Pat
         spec.layout.page = "Card"
         spec.style.size_mm = 4.8
         rng = np.random.default_rng(item["seed"])
-        page = compose_calligraphy_page(text, spec, rng=rng)
+        page = compose_calligraphy_page(item["text"], spec, rng=rng)
         img = render_page(page, spec, dpi=220, rng=rng)
 
         # Save individual card
@@ -208,11 +234,11 @@ def generate_allograph_persona_comparison(out_dir: Path, brain_dir: Path) -> Pat
 
         rendered_cards.append((item, img))
 
-    # Compose Comparison Board (2 x 2 grid)
+    # Compose Comparison Board (3 x 2 grid)
     header_h = 120
     margin = 30
     spacing = 25
-    cols = 2
+    cols = 3
     rows = 2
 
     total_w = margin * 2 + cols * card_w + (cols - 1) * spacing
@@ -226,14 +252,14 @@ def generate_allograph_persona_comparison(out_dir: Path, brain_dir: Path) -> Pat
     try:
         font_title = ImageFont.truetype("malgunbd.ttf", 32)
         font_sub = ImageFont.truetype("malgun.ttf", 18)
-        font_card_t = ImageFont.truetype("malgunbd.ttf", 19)
+        font_card_t = ImageFont.truetype("malgunbd.ttf", 18)
         font_card_s = ImageFont.truetype("malgun.ttf", 14)
         font_card_d = ImageFont.truetype("malgun.ttf", 13)
     except Exception:
         font_title = font_sub = font_card_t = font_card_s = font_card_d = ImageFont.load_default()
 
-    draw.text((margin + 10, 24), "한글 손글씨 골격 다양성 비교 (Allograph Skeletal Personas)", fill=(255, 255, 255), font=font_title)
-    draw.text((margin + 12, 72), "동일한 문장이라도 화자의 성향과 목적에 따라 글자의 구조·획 분할·곡률이 완전히 달라지는 물리적 다양성", fill=(190, 205, 230), font=font_sub)
+    draw.text((margin + 10, 24), "한글·영문 손글씨 골격 다양성 & 정통 명필 비교 (Allograph Skeletal Personas)", fill=(255, 255, 255), font=font_title)
+    draw.text((margin + 12, 72), "자유분방한 일상 필적부터 누가 봐도 감탄하는 정통 궁체 흘림체 & 스펜서리안 명필 필기체까지 완벽 구현", fill=(190, 205, 230), font=font_sub)
 
     for idx, (meta, img) in enumerate(rendered_cards):
         r = idx // cols
@@ -267,6 +293,103 @@ def generate_allograph_persona_comparison(out_dir: Path, brain_dir: Path) -> Pat
     return persona_board_path
 
 
+def generate_master_vs_casual_showcase(out_dir: Path, brain_dir: Path) -> Path:
+    """Generates a dedicated side-by-side showcase highlighting:
+
+    '자유분방한 필기체 (Casual / Spontaneous Cursive)' vs '누가 봐도 멋진 명필 필기체 (Virtuoso Master Cursive)'.
+    """
+    sample_text = (
+        "부용지 잔잔한 수면 위로 둥근 가을달이 내려앉으면,\n"
+        "오래된 정자의 기와 끝마다 은빛 이슬이 고요히 맺힙니다."
+    )
+
+    # 1. 자유분방 필기체 (Casual / Spontaneous Gosi)
+    spec_casual = interpret("고시체 수험생 속기 필기로 자유분방하고 빠르게 쓴 글 남색 만년필")
+    spec_casual.layout.page = "Card"
+    spec_casual.style.size_mm = 4.6
+    rng_c = np.random.default_rng(911)
+    page_casual = compose_calligraphy_page(sample_text, spec_casual, rng=rng_c)
+    img_casual = render_page(page_casual, spec_casual, dpi=240, rng=rng_c)
+
+    # 2. 누가 봐도 멋진 명필 정통 흘림체 (Master Heullim Virtuoso)
+    spec_master = interpret("명필 흘림체로 단아하고 품격 있는 궁체 흘림 유려하게 쓴 편지 남색 만년필")
+    spec_master.layout.page = "Card"
+    spec_master.style.size_mm = 4.6
+    rng_m = np.random.default_rng(912)
+    page_master = compose_calligraphy_page(sample_text, spec_master, rng=rng_m)
+    img_master = render_page(page_master, spec_master, dpi=240, rng=rng_m)
+
+    # Compose Comparison Board
+    card_w, card_h = 760, 560
+    header_h = 130
+    margin = 35
+    spacing = 30
+
+    total_w = margin * 2 + 2 * card_w + spacing
+    total_h = header_h + margin * 2 + card_h
+
+    board = Image.new("RGB", (total_w, total_h), (245, 244, 240))
+    draw = ImageDraw.Draw(board)
+
+    # Header
+    draw.rectangle([(0, 0), (total_w, header_h)], fill=(20, 26, 38))
+    try:
+        font_title = ImageFont.truetype("malgunbd.ttf", 34)
+        font_sub = ImageFont.truetype("malgun.ttf", 19)
+        font_tag = ImageFont.truetype("malgunbd.ttf", 22)
+        font_desc = ImageFont.truetype("malgun.ttf", 15)
+    except Exception:
+        font_title = font_sub = font_tag = font_desc = ImageFont.load_default()
+
+    draw.text((margin + 10, 26), "자유분방 필기체 vs 누가 봐도 멋진 명필 필기체 정밀 비교", fill=(255, 255, 255), font=font_title)
+    draw.text((margin + 12, 78), "자유롭고 거침없는 실전 속기 필적과 정통 궁중 서예의 유려한 조형미를 겸비한 명필 흘림체의 극적인 대비", fill=(190, 205, 230), font=font_sub)
+
+    items = [
+        (
+            img_casual,
+            "[A] 자유분방 속기 필기체 (Casual / Spontaneous)",
+            "• 초고속 필기 특유의 거침없는 속도감과 파격적인 획 생략\n• 단일 획 Z-ㄹ, 단순 타원 ㅁ, 가파른 틸트와 불규칙한 리듬감",
+            (235, 238, 245),
+        ),
+        (
+            img_master,
+            "[B] 누가 봐도 멋진 명필 정통 흘림체 (Master Virtuoso) ★",
+            "• 정통 궁체 흘림에 기반한 단아한 품격과 완벽한 시각적 균형미\n• 우아한 S자 곡선 3단 굽이침 ㄹ, 단아한 2획 ㅁ, 절제된 기필과 유려한 연맥",
+            (240, 245, 238),
+        ),
+    ]
+
+    for i, (img, tag, desc, bg_tint) in enumerate(items):
+        px = margin + i * (card_w + spacing)
+        py = header_h + margin
+
+        # Container
+        draw.rectangle([(px - 3, py - 3), (px + card_w + 3, py + card_h + 3)], fill=(220, 218, 212))
+        draw.rectangle([(px, py), (px + card_w, py + card_h)], fill=(255, 255, 255))
+
+        # Thumbnail
+        thumb_area_h = card_h - 110
+        img_thumb = img.copy()
+        img_thumb.thumbnail((card_w - 24, thumb_area_h - 16), Image.Resampling.LANCZOS)
+        tx = px + (card_w - img_thumb.width) // 2
+        ty = py + 10 + (thumb_area_h - img_thumb.height) // 2
+        board.paste(img_thumb, (tx, ty))
+
+        # Desc bar
+        bar_y = py + thumb_area_h + 4
+        draw.rectangle([(px, bar_y), (px + card_w, py + card_h)], fill=bg_tint)
+        draw.line([(px, bar_y), (px + card_w, bar_y)], fill=(215, 212, 205), width=1)
+        draw.text((px + 18, bar_y + 10), tag, fill=(20, 25, 35), font=font_tag)
+        draw.text((px + 18, bar_y + 44), desc, fill=(70, 75, 85), font=font_desc)
+
+    save_path = out_dir / "gallery_master_vs_casual_cursive.png"
+    board.save(save_path, quality=95)
+    if brain_dir.exists():
+        board.save(brain_dir / "gallery_master_vs_casual_cursive.png")
+    return save_path
+
+
+
 def main() -> None:
     out_dir = Path("outputs/physical_showcase")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -279,6 +402,10 @@ def main() -> None:
     print("=== 2. Generating Allograph Persona Comparison Board ===")
     p2 = generate_allograph_persona_comparison(out_dir, brain_dir)
     print(f"Generated: {p2}")
+
+    print("=== 3. Generating Master vs Casual Cursive Showcase ===")
+    p3 = generate_master_vs_casual_showcase(out_dir, brain_dir)
+    print(f"Generated: {p3}")
 
     print("=== All physical showcase assets generated successfully! ===")
 

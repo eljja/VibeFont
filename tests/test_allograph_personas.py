@@ -47,6 +47,30 @@ def test_rounded_diary_produces_exaggerated_round_loops():
     assert diary_w > std_w * 1.08, f"Diary ㅇ width {diary_w} should be noticeably larger than standard {std_w}"
 
 
+def test_master_heullim_produces_flowing_calligraphic_allographs():
+    profile = WriterProfile(archetype="master_heullim")
+    # In master_heullim:
+    # ㄹ (idx 5) is a single continuous S-river classical calligraphy stroke
+    st_rieul = choseong_strokes(5, profile=profile)
+    assert len(st_rieul) == 1, f"Expected 1 continuous S-river stroke for master heullim ㄹ, got {len(st_rieul)}"
+    pts_rieul = st_rieul[0]
+    assert len(pts_rieul) >= 16
+
+    # ㅁ (idx 6) has 2 refined strokes: left pillar + continuous flowing enclosure
+    st_mieum = choseong_strokes(6, profile=profile)
+    assert len(st_mieum) == 2, f"Expected 2 refined strokes for master heullim ㅁ, got {len(st_mieum)}"
+
+    # ㅂ (idx 7) has 3 strokes: left pillar, commanding right pillar, and flowing ligature
+    st_bieup = choseong_strokes(7, profile=profile)
+    assert len(st_bieup) == 3, f"Expected 3 strokes for master heullim ㅂ, got {len(st_bieup)}"
+
+    # ㅅ (idx 9) has sweeping graceful curved arcs for both sweeps
+    st_siot = choseong_strokes(9, profile=profile)
+    assert len(st_siot) == 2
+    assert len(st_siot[0]) >= 12
+    assert len(st_siot[1]) >= 12
+
+
 def test_lexicon_maps_personas_from_prompts():
     spec_gosi = interpret("고시체 수험생 속기 필기")
     assert spec_gosi.style.archetype == "gosi"
@@ -59,3 +83,9 @@ def test_lexicon_maps_personas_from_prompts():
     spec_diary = interpret("둥근 다이어리체 귀엽고 아기자기하게")
     assert spec_diary.style.archetype == "rounded_diary"
     assert spec_diary.style.roundness >= 0.70
+
+    spec_master = interpret("명필처럼 멋진 필기체로 유려한 서예 흘림")
+    assert spec_master.style.archetype == "master_heullim"
+    assert spec_master.style.neatness >= 0.70
+    assert spec_master.style.connectedness >= 0.60
+

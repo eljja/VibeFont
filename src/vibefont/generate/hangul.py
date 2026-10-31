@@ -47,6 +47,7 @@ WRITER_ARCHETYPES = (
     "gosi",
     "classic_jeongja",
     "rounded_diary",
+    "master_heullim",
 )
 
 
@@ -107,6 +108,15 @@ def sample_writer_profile(
         s_bend = float(rng.uniform(-0.02, 0.04))
         loop_r = float(rng.uniform(1.28, 1.48))
         allo_bias = 0.40
+    elif arch == "master_heullim":
+        w_sc = float(rng.uniform(0.98, 1.05))
+        h_sc = float(rng.uniform(1.04, 1.10))
+        cho_sc = float(rng.uniform(1.02, 1.10))
+        jong_sc = float(rng.uniform(0.90, 1.00))
+        h_tilt = float(rng.uniform(0.06, 0.11))
+        s_bend = float(rng.uniform(0.015, 0.045))
+        loop_r = float(rng.uniform(1.02, 1.15))
+        allo_bias = 0.90
     elif arch == "tall_slender":
         w_sc = float(rng.uniform(0.75, 0.85))
         h_sc = float(rng.uniform(1.04, 1.12))
@@ -257,6 +267,8 @@ def choseong_strokes(
                 _curve([[0.08, 0.14], [0.86, 0.14]], 8, rng, 0.0),
                 _curve([[0.86, 0.14], [0.86, 0.90]], 10, rng, 0.0),
             ]
+        if arch == "master_heullim":
+            return [_curve([[0.06, 0.16], [0.52, 0.12 - 0.5 * ht], [0.88, 0.10 - ht], [0.85, 0.38], [0.78, 0.68], [0.66, 0.92]], 18, rng, jit)]
         if arch == "gosi":
             return [_curve([[0.06, 0.16], [0.88, 0.10 - ht], [0.72, 0.92]], 14, rng, jit)]
         if arch == "rounded_diary":
@@ -265,6 +277,10 @@ def choseong_strokes(
             return [_curve([[0.08, 0.16], [0.86, 0.12 - ht], [0.76, 0.90]], 14, rng, jit)]
         return [_curve([[0.06, 0.18], [0.50, 0.12 - 0.5 * ht], [0.88, 0.12 - ht], [0.82, 0.54], [0.68, 0.92]], 15, rng, jit)]
     elif idx == 1:  # ㄲ
+        if arch == "master_heullim":
+            s1 = _curve([[0.04, 0.16], [0.42, 0.11 - ht], [0.40, 0.50], [0.34, 0.92]], 12, rng, jit)
+            s2 = _curve([[0.50, 0.16], [0.92, 0.10 - ht], [0.90, 0.45], [0.80, 0.92]], 14, rng, jit)
+            return [s1, s2]
         s1 = _curve([[0.04, 0.16], [0.44, 0.11 - ht], [0.42, 0.55], [0.35, 0.92]], 12, rng, jit)
         s2 = _curve([[0.52, 0.16], [0.94, 0.11 - ht], [0.92, 0.55], [0.83, 0.92]], 12, rng, jit)
         return [s1, s2]
@@ -274,6 +290,8 @@ def choseong_strokes(
                 _curve([[0.16, 0.08], [0.16, 0.88]], 10, rng, 0.0),
                 _curve([[0.16, 0.88], [0.92, 0.88]], 9, rng, 0.0),
             ]
+        if arch == "master_heullim":
+            return [_curve([[0.18, 0.08], [0.15, 0.50], [0.16, 0.84], [0.38, 0.90], [0.72, 0.88 - 0.5 * ht], [0.94, 0.82 - ht]], 16, rng, jit)]
         if roll < 0.55:
             return [_curve([[0.16, 0.08], [0.13, 0.56], [0.15, 0.88], [0.54, 0.90], [0.92, 0.85 - ht]], 14, rng, jit)]
         return [_curve([[0.18, 0.08], [0.12, 0.78], [0.36, 0.91], [0.92, 0.83 - ht]], 14, rng, jit)]
@@ -282,6 +300,11 @@ def choseong_strokes(
             return [
                 _curve([[0.12, 0.14], [0.88, 0.14]], 8, rng, 0.0),
                 _curve([[0.14, 0.14], [0.14, 0.88], [0.90, 0.88]], 12, rng, 0.0),
+            ]
+        if arch == "master_heullim":
+            return [
+                _curve([[0.10, 0.14], [0.55, 0.11 - 0.5 * ht], [0.90, 0.08 - ht]], 10, rng, jit),
+                _curve([[0.16, 0.16], [0.14, 0.54], [0.16, 0.86], [0.50, 0.90], [0.94, 0.84 - ht]], 15, rng, jit),
             ]
         if arch == "gosi":
             return [_curve([[0.12, 0.14], [0.86, 0.11 - ht], [0.14, 0.48], [0.12, 0.88], [0.90, 0.85 - ht]], 14, rng, jit)]
@@ -303,6 +326,17 @@ def choseong_strokes(
                 _curve([[0.14, 0.46], [0.86, 0.46]], 8, rng, 0.0),
                 _curve([[0.14, 0.46], [0.14, 0.88], [0.88, 0.88]], 10, rng, 0.0),
             ]
+        if arch == "master_heullim":
+            return [_curve([
+                [0.08, 0.14],
+                [0.86, 0.09 - ht],
+                [0.84, 0.36],
+                [0.45, 0.44],
+                [0.14, 0.50],
+                [0.15, 0.86],
+                [0.54, 0.90],
+                [0.94, 0.84 - ht]
+            ], 20, rng, jit)]
         if arch == "gosi":
             return [_curve([[0.08, 0.14], [0.88, 0.10 - ht], [0.82, 0.46], [0.12, 0.50], [0.14, 0.88], [0.92, 0.84 - ht]], 16, rng, jit)]
         if connectedness < 0.35 or (connectedness < 0.78 and roll < 0.45):
@@ -321,6 +355,11 @@ def choseong_strokes(
                 _curve([[0.14, 0.14], [0.14, 0.88]], 8, rng, 0.0),
                 _curve([[0.14, 0.14], [0.86, 0.14], [0.86, 0.88]], 12, rng, 0.0),
                 _curve([[0.14, 0.88], [0.86, 0.88]], 8, rng, 0.0),
+            ]
+        if arch == "master_heullim":
+            return [
+                _curve([[0.16, 0.12], [0.15, 0.52], [0.16, 0.88]], 10, rng, jit),
+                _curve([[0.15, 0.14], [0.86, 0.10 - ht], [0.85, 0.50], [0.82, 0.88], [0.50, 0.88], [0.16, 0.87]], 18, rng, jit),
             ]
         if arch == "gosi":
             return [_curve([[0.14, 0.18], [0.12, 0.86], [0.86, 0.86], [0.86, 0.16], [0.16, 0.16]], 14, rng, jit)]
@@ -344,6 +383,12 @@ def choseong_strokes(
                 _curve([[0.16, 0.48], [0.84, 0.48]], 7, rng, 0.0),
                 _curve([[0.16, 0.89], [0.84, 0.89]], 7, rng, 0.0),
             ]
+        if arch == "master_heullim":
+            return [
+                _curve([[0.18, 0.08], [0.16, 0.50], [0.18, 0.90]], 10, rng, jit),
+                _curve([[0.82, 0.06], [0.83, 0.48], [0.80, 0.90]], 10, rng, jit),
+                _curve([[0.18, 0.48], [0.50, 0.46], [0.81, 0.44], [0.48, 0.66], [0.18, 0.88], [0.81, 0.86 - ht]], 16, rng, jit),
+            ]
         return [
             _curve([[0.16, 0.08], [0.14, 0.52], [0.16, 0.90]], 10, rng, jit),
             _curve([[0.84, 0.08], [0.85, 0.52], [0.82, 0.90]], 10, rng, jit),
@@ -358,12 +403,23 @@ def choseong_strokes(
             _curve([[0.54, 0.50], [0.92, 0.48]], 8, rng, jit),
         ]
     elif idx == 9:  # ㅅ: 2-stroke with varied branch point
+        if arch == "master_heullim":
+            return [
+                _curve([[0.52, 0.06], [0.40, 0.38], [0.22, 0.68], [0.06, 0.90]], 14, rng, jit),
+                _curve([[0.36, 0.42], [0.58, 0.64], [0.82, 0.82], [0.95, 0.86 - ht]], 14, rng, jit),
+            ]
         by = 0.45 + (float(rng.uniform(-0.08, 0.08)) if rng is not None else 0.0)
         return [
             _curve([[0.52, 0.08], [0.36, 0.52], [0.08, 0.90]], 10, rng, jit),
             _curve([[0.38, by], [0.66, 0.68], [0.92, 0.88]], 10, rng, jit),
         ]
     elif idx == 10:  # ㅆ
+        if arch == "master_heullim":
+            s1 = _curve([[0.28, 0.08], [0.20, 0.45], [0.06, 0.90]], 11, rng, jit)
+            s2 = _curve([[0.18, 0.46], [0.32, 0.68], [0.44, 0.88]], 11, rng, jit)
+            s3 = _curve([[0.74, 0.06], [0.65, 0.42], [0.50, 0.90]], 12, rng, jit)
+            s4 = _curve([[0.64, 0.44], [0.80, 0.68], [0.96, 0.88 - ht]], 12, rng, jit)
+            return [s1, s2, s3, s4]
         return [
             _curve([[0.28, 0.08], [0.18, 0.52], [0.04, 0.90]], 9, rng, jit),
             _curve([[0.20, 0.45], [0.35, 0.68], [0.46, 0.88]], 9, rng, jit),
@@ -372,9 +428,14 @@ def choseong_strokes(
         ]
     elif idx == 11:  # ㅇ
         rx = 0.44 if arch == "rounded_diary" else 0.38
-        ry = 0.44 if arch == "rounded_diary" else 0.39
+        ry = 0.44 if arch == "rounded_diary" else (0.41 if arch == "master_heullim" else 0.39)
         return [_ellipse_strokes(0.50, 0.50, rx, ry, 18, rng=rng, profile=profile)]
     elif idx == 12:  # ㅈ: 2-stroke standard vs 3-stroke print
+        if arch == "master_heullim":
+            return [
+                _curve([[0.08, 0.14], [0.50, 0.11 - 0.5 * ht], [0.88, 0.09 - ht], [0.48, 0.46], [0.24, 0.70], [0.06, 0.92]], 18, rng, jit),
+                _curve([[0.42, 0.46], [0.65, 0.68], [0.94, 0.88 - ht]], 12, rng, jit),
+            ]
         if roll > 0.65:
             return [
                 _curve([[0.10, 0.16], [0.88, 0.11 - ht]], 9, rng, jit),
@@ -393,6 +454,12 @@ def choseong_strokes(
             _curve([[0.72, 0.50], [0.96, 0.88]], 8, rng, jit),
         ]
     elif idx == 14:  # ㅊ: vertical top tick vs horizontal top tick + ㅈ
+        if arch == "master_heullim":
+            return [
+                _curve([[0.44, 0.04], [0.54, 0.14]], 6, rng, jit),
+                _curve([[0.08, 0.22], [0.50, 0.19 - 0.5 * ht], [0.88, 0.17 - ht], [0.48, 0.52], [0.24, 0.74], [0.06, 0.94]], 18, rng, jit),
+                _curve([[0.42, 0.52], [0.65, 0.72], [0.94, 0.90 - ht]], 12, rng, jit),
+            ]
         if roll < 0.50:
             return [
                 _curve([[0.50, 0.02], [0.50, 0.18]], 7, rng, jit),
@@ -423,6 +490,11 @@ def choseong_strokes(
             _curve([[0.06, 0.89], [0.50, 0.87], [0.94, 0.84 - ht]], 9, rng, jit),
         ]
     elif idx == 18:  # ㅎ: 3 clean allographs (2-stroke connected top cap + circle, or 3-stroke vertical/slanted dot + bar + circle)
+        if arch == "master_heullim":
+            return [
+                _curve([[0.48, 0.02], [0.50, 0.16], [0.12, 0.22], [0.50, 0.20], [0.90, 0.18 - ht]], 15, rng, jit),
+                _ellipse_strokes(0.50, 0.62, 0.35, 0.29, 18, rng=rng, profile=profile),
+            ]
         if arch == "rounded_diary":
             return [
                 _curve([[0.48, 0.04], [0.52, 0.16]], 6, rng, jit),

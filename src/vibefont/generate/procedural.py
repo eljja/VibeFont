@@ -285,7 +285,7 @@ class ProceduralGenerator:
         }
 
     def _font(self, style: StyleSpec) -> _Font:
-        if style.connectedness >= 0.65 and style.roundness >= 0.55:
+        if getattr(style, "archetype", "") == "master_heullim" or (style.connectedness >= 0.65 and style.roundness >= 0.55):
             return self.fonts["fancy"]
         if style.connectedness >= 0.36:
             return self.fonts["cursive"]
