@@ -26,7 +26,7 @@ DIMINISHERS = {
     "약간": 0.5, "조금": 0.5, "살짝": 0.4, "다소": 0.6, "slightly": 0.5, "a bit": 0.5,
     "a little": 0.5, "somewhat": 0.6,
 }
-NEGATIONS = ("않", "안 ", "없", "not ", "no ", "n't")
+NEGATIONS = ("않", "안 ", "없는 ", "없이", "not ", "no ", "n't")
 
 COLORS: dict[tuple[str, ...], tuple[float, float, float]] = {
     ("검정", "검은", "까만", "black"): (0.06, 0.06, 0.07),
@@ -80,7 +80,7 @@ RULES: list[Rule] = [
     Rule("wide", ("넓은", "넉넉", "wide", "airy"), {"width_scale": 0.2, "letter_spacing": 0.15, "word_spacing": 0.2}),
     Rule("upright", ("똑바로", "세로로", "upright", "vertical"), {"slant_deg": -8}),
     Rule("slanted", ("기울", "이탤릭", "slanted", "italic"), {"slant_deg": 10}),
-    Rule("cursive", ("필기체", "흘려", "이어", "cursive", "joined", "script"), {"connectedness": 0.4}),
+    Rule("cursive", ("필기체", "흘려", "이어", "자유분방", "자유로운", "거침없는", "cursive", "joined", "script", "free"), {"connectedness": 0.4, "speed": 0.2}),
     Rule("print", ("정자", "인쇄체", "또박또박", "print", "block letters"), {"connectedness": -0.4, "neatness": 0.15}),
     Rule("tired", ("피곤", "졸린", "지친", "tired", "sleepy", "exhausted"),
          {"fatigue": 0.5, "neatness": -0.2, "baseline_wobble": 0.2, "pressure": -0.15, "slant_deg": 3}),
@@ -104,6 +104,15 @@ RULES: list[Rule] = [
     Rule("persona_diary", ("둥근 다이어리", "다이어리체", "동글동글", "동글이", "손글씨 다이어리", "bubbly diary", "rounded diary"),
          {"roundness": 0.45, "connectedness": -0.15, "neatness": 0.25, "size_mm": 0.50, "width_scale": 0.15},
          {"style": {"archetype": "rounded_diary"}, "paper": {"type": "ruled"}}),
+    Rule("persona_geometric_sans", ("고딕", "고딕체", "산세리프", "모던", "직선", "geometric", "sans", "clean sans"),
+         {"connectedness": -0.45, "neatness": 0.40, "roundness": -0.40, "slant_deg": -6.0},
+         {"style": {"archetype": "geometric_sans"}}),
+    Rule("persona_classic_myeongjo", ("명조", "명조체", "바탕", "바탕체", "세리프", "serif", "myeongjo", "batang"),
+         {"connectedness": -0.20, "neatness": 0.35, "consistency": 0.30},
+         {"style": {"archetype": "classic_myeongjo"}}),
+    Rule("persona_retro_typewriter", ("타자기", "타자기체", "레트로", "타이프", "typewriter", "monospace", "vintage mono"),
+         {"connectedness": -0.50, "neatness": 0.20, "slant_deg": -6.0, "letter_spacing": 0.15},
+         {"style": {"archetype": "retro_typewriter"}}),
     # ----------------------------------------------------------------- pens
     Rule("pen_fountain", ("만년필", "fountain"), {"connectedness": 0.1},
          {"pen": {"type": "fountain", "width_mm": 0.55}}),

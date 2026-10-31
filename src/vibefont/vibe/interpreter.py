@@ -24,7 +24,14 @@ def _intensity(clause: str) -> float:
     for w, m in DIMINISHERS.items():
         if w in clause:
             f = min(f, m)
-    if any(n in clause for n in NEGATIONS):
+    is_neg = False
+    for n in NEGATIONS:
+        if n in clause:
+            if any(w in clause for w in ("거침없는", "꾸밈없는", "틀림없는")):
+                continue
+            is_neg = True
+            break
+    if is_neg:
         f = -0.7 * f
     return f
 
@@ -39,7 +46,14 @@ def interpret(prompt: str, base: VibeSpec | None = None) -> VibeSpec:
             continue
         f = _intensity(clause)
         for rule in RULES:
-            if not any(k in clause for k in rule.keywords):
+            matched_kw = False
+            for k in rule.keywords:
+                if k in clause:
+                    if k in ("세리프", "serif") and ("산세리프" in clause or "sans" in clause):
+                        continue
+                    matched_kw = True
+                    break
+            if not matched_kw:
                 continue
             spec.matched.append(f"{rule.name}x{f:+.1f}")
             for k, dv in rule.delta.items():

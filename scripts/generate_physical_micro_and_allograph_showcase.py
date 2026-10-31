@@ -77,6 +77,15 @@ def generate_microphysics_comparison(out_dir: Path, brain_dir: Path) -> Path:
     crop_fountain_zoom = crop_fountain.resize((zoom_w, zoom_h), Image.Resampling.NEAREST)
     crop_ball_zoom = crop_ball.resize((zoom_w, zoom_h), Image.Resampling.NEAREST)
 
+    # Save individual high-res macro crops
+    crop_pencil_zoom.save(out_dir / "micro_pencil_texture.png")
+    crop_fountain_zoom.save(out_dir / "micro_fountain_tine_split.png")
+    crop_ball_zoom.save(out_dir / "micro_ballpoint_rim_paste.png")
+    if brain_dir.exists():
+        crop_pencil_zoom.save(brain_dir / "micro_pencil_texture.png")
+        crop_fountain_zoom.save(brain_dir / "micro_fountain_tine_split.png")
+        crop_ball_zoom.save(brain_dir / "micro_ballpoint_rim_paste.png")
+
     # Compose Macro Texture Board
     margin = 30
     spacing = 25
@@ -310,6 +319,9 @@ def generate_master_vs_casual_showcase(out_dir: Path, brain_dir: Path) -> Path:
     rng_c = np.random.default_rng(911)
     page_casual = compose_calligraphy_page(sample_text, spec_casual, rng=rng_c)
     img_casual = render_page(page_casual, spec_casual, dpi=240, rng=rng_c)
+    img_casual.save(out_dir / "card_casual_gosi_full.png")
+    if brain_dir.exists():
+        img_casual.save(brain_dir / "card_casual_gosi_full.png")
 
     # 2. 누가 봐도 멋진 명필 정통 흘림체 (Master Heullim Virtuoso)
     spec_master = interpret("명필 흘림체로 단아하고 품격 있는 궁체 흘림 유려하게 쓴 편지 남색 만년필")
@@ -318,6 +330,9 @@ def generate_master_vs_casual_showcase(out_dir: Path, brain_dir: Path) -> Path:
     rng_m = np.random.default_rng(912)
     page_master = compose_calligraphy_page(sample_text, spec_master, rng=rng_m)
     img_master = render_page(page_master, spec_master, dpi=240, rng=rng_m)
+    img_master.save(out_dir / "card_master_heullim_full.png")
+    if brain_dir.exists():
+        img_master.save(brain_dir / "card_master_heullim_full.png")
 
     # Compose Comparison Board
     card_w, card_h = 760, 560

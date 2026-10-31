@@ -48,6 +48,9 @@ WRITER_ARCHETYPES = (
     "classic_jeongja",
     "rounded_diary",
     "master_heullim",
+    "geometric_sans",
+    "classic_myeongjo",
+    "retro_typewriter",
 )
 
 
@@ -98,6 +101,33 @@ def sample_writer_profile(
         h_tilt = 0.0
         s_bend = 0.0
         loop_r = 1.0
+        allo_bias = 0.05
+    elif arch == "geometric_sans":
+        w_sc = float(rng.uniform(0.98, 1.04))
+        h_sc = float(rng.uniform(0.98, 1.03))
+        cho_sc = 1.0
+        jong_sc = 1.0
+        h_tilt = 0.0
+        s_bend = 0.0
+        loop_r = 1.02
+        allo_bias = 0.0
+    elif arch == "classic_myeongjo":
+        w_sc = float(rng.uniform(0.96, 1.02))
+        h_sc = float(rng.uniform(1.00, 1.05))
+        cho_sc = float(rng.uniform(0.96, 1.02))
+        jong_sc = float(rng.uniform(0.95, 1.02))
+        h_tilt = float(rng.uniform(0.01, 0.03))
+        s_bend = 0.0
+        loop_r = 0.98
+        allo_bias = 0.10
+    elif arch == "retro_typewriter":
+        w_sc = float(rng.uniform(0.96, 1.02))
+        h_sc = float(rng.uniform(0.96, 1.02))
+        cho_sc = 1.0
+        jong_sc = 0.95
+        h_tilt = 0.0
+        s_bend = 0.0
+        loop_r = 0.92
         allo_bias = 0.05
     elif arch == "rounded_diary":
         w_sc = float(rng.uniform(1.12, 1.25))
@@ -262,10 +292,20 @@ def choseong_strokes(
     jit = 0.018 if rng is not None else 0.0
 
     if idx == 0:  # ㄱ: 2 clean allographs (crisp corner vs gently arched downstroke)
-        if arch == "classic_jeongja":
+        if arch in ("classic_jeongja", "geometric_sans"):
             return [
                 _curve([[0.08, 0.14], [0.86, 0.14]], 8, rng, 0.0),
                 _curve([[0.86, 0.14], [0.86, 0.90]], 10, rng, 0.0),
+            ]
+        if arch == "retro_typewriter":
+            return [
+                _curve([[0.10, 0.16], [0.84, 0.16]], 8, rng, 0.006),
+                _curve([[0.84, 0.16], [0.84, 0.88]], 9, rng, 0.006),
+            ]
+        if arch == "classic_myeongjo":
+            return [
+                _curve([[0.08, 0.14], [0.86, 0.14]], 8, rng, 0.0),
+                _curve([[0.86, 0.14], [0.84, 0.55], [0.80, 0.90]], 12, rng, 0.004),
             ]
         if arch == "master_heullim":
             return [_curve([[0.06, 0.16], [0.52, 0.12 - 0.5 * ht], [0.88, 0.10 - ht], [0.85, 0.38], [0.78, 0.68], [0.66, 0.92]], 18, rng, jit)]
@@ -284,33 +324,71 @@ def choseong_strokes(
         s1 = _curve([[0.04, 0.16], [0.44, 0.11 - ht], [0.42, 0.55], [0.35, 0.92]], 12, rng, jit)
         s2 = _curve([[0.52, 0.16], [0.94, 0.11 - ht], [0.92, 0.55], [0.83, 0.92]], 12, rng, jit)
         return [s1, s2]
-    elif idx == 2:  # ㄴ: 2 clean allographs (standard L vs softly scooped bottom)
-        if arch == "classic_jeongja":
+    elif idx == 2:  # ㄴ: diverse clean allographs across archetypes (never sagging or drooping)
+        if arch in ("classic_jeongja", "geometric_sans"):
             return [
                 _curve([[0.16, 0.08], [0.16, 0.88]], 10, rng, 0.0),
                 _curve([[0.16, 0.88], [0.92, 0.88]], 9, rng, 0.0),
             ]
+        if arch == "retro_typewriter":
+            return [
+                _curve([[0.18, 0.10], [0.18, 0.86]], 9, rng, 0.006),
+                _curve([[0.18, 0.86], [0.88, 0.86]], 9, rng, 0.006),
+            ]
+        if arch == "classic_myeongjo":
+            # Elegant regular script: straight downstroke, flat baseline, upward serif foot
+            return [
+                _curve([[0.17, 0.08], [0.16, 0.86]], 9, rng, 0.004),
+                _curve([[0.16, 0.86], [0.84, 0.86 - ht], [0.92, 0.80 - ht]], 11, rng, 0.004),
+            ]
         if arch == "master_heullim":
-            return [_curve([[0.18, 0.08], [0.15, 0.50], [0.16, 0.84], [0.38, 0.90], [0.72, 0.88 - 0.5 * ht], [0.94, 0.82 - ht]], 16, rng, jit)]
-        if roll < 0.55:
-            return [_curve([[0.16, 0.08], [0.13, 0.56], [0.15, 0.88], [0.54, 0.90], [0.92, 0.85 - ht]], 14, rng, jit)]
-        return [_curve([[0.18, 0.08], [0.12, 0.78], [0.36, 0.91], [0.92, 0.83 - ht]], 14, rng, jit)]
+            # Flowing court cursive: smooth upright stem, rounded baseline transition, graceful upward lift
+            return [_curve([[0.18, 0.08], [0.16, 0.50], [0.17, 0.84], [0.26, 0.86], [0.62, 0.85 - 0.5 * ht], [0.92, 0.82 - ht]], 16, rng, jit)]
+        if arch == "gosi":
+            # Fast shorthand: brisk downstroke, crisp turn, swift upward release
+            return [_curve([[0.18, 0.08], [0.15, 0.84], [0.28, 0.86], [0.90, 0.82 - ht]], 14, rng, jit)]
+        if arch == "rounded_diary":
+            # Cute diary: friendly rounded corner, completely flat horizontal base
+            return [_curve([[0.18, 0.10], [0.16, 0.70], [0.24, 0.86], [0.55, 0.86], [0.88, 0.86 - ht]], 14, rng, jit)]
+
+        # Standard / diverse default handwriting (flat or slight upward hook, never sagging):
+        if roll < 0.35:
+            # 2-stroke crisp L
+            return [
+                _curve([[0.16, 0.08], [0.16, 0.86]], 9, rng, jit),
+                _curve([[0.16, 0.86], [0.90, 0.86 - ht]], 9, rng, jit),
+            ]
+        if roll < 0.70:
+            # 1-stroke angular L with flat horizontal base
+            return [_curve([[0.16, 0.08], [0.15, 0.85], [0.22, 0.86], [0.55, 0.86 - 0.5 * ht], [0.92, 0.85 - ht]], 14, rng, jit)]
+        # 1-stroke with subtle upward hook/삐침
+        return [_curve([[0.17, 0.08], [0.16, 0.84], [0.24, 0.86], [0.80, 0.86 - 0.5 * ht], [0.92, 0.81 - ht]], 14, rng, jit)]
     elif idx == 3:  # ㄷ: always 2 strokes so it is never confused with ㄹ
-        if arch == "classic_jeongja":
+        if arch in ("classic_jeongja", "geometric_sans"):
             return [
                 _curve([[0.12, 0.14], [0.88, 0.14]], 8, rng, 0.0),
                 _curve([[0.14, 0.14], [0.14, 0.88], [0.90, 0.88]], 12, rng, 0.0),
             ]
+        if arch == "retro_typewriter":
+            return [
+                _curve([[0.14, 0.16], [0.86, 0.16]], 8, rng, 0.006),
+                _curve([[0.16, 0.16], [0.16, 0.86], [0.86, 0.86]], 12, rng, 0.006),
+            ]
+        if arch == "classic_myeongjo":
+            return [
+                _curve([[0.12, 0.14], [0.88, 0.14]], 8, rng, 0.004),
+                _curve([[0.16, 0.14], [0.16, 0.86], [0.82, 0.86 - ht], [0.90, 0.81 - ht]], 14, rng, 0.004),
+            ]
         if arch == "master_heullim":
             return [
                 _curve([[0.10, 0.14], [0.55, 0.11 - 0.5 * ht], [0.90, 0.08 - ht]], 10, rng, jit),
-                _curve([[0.16, 0.16], [0.14, 0.54], [0.16, 0.86], [0.50, 0.90], [0.94, 0.84 - ht]], 15, rng, jit),
+                _curve([[0.16, 0.16], [0.14, 0.54], [0.16, 0.86], [0.26, 0.86], [0.65, 0.85 - 0.5 * ht], [0.94, 0.82 - ht]], 16, rng, jit),
             ]
         if arch == "gosi":
-            return [_curve([[0.12, 0.14], [0.86, 0.11 - ht], [0.14, 0.48], [0.12, 0.88], [0.90, 0.85 - ht]], 14, rng, jit)]
+            return [_curve([[0.12, 0.14], [0.86, 0.11 - ht], [0.14, 0.48], [0.14, 0.86], [0.90, 0.83 - ht]], 14, rng, jit)]
         return [
             _curve([[0.13, 0.15], [0.52, 0.11 - 0.5 * ht], [0.89, 0.09 - ht]], 10, rng, jit),
-            _curve([[0.16, 0.15], [0.13, 0.56], [0.15, 0.89], [0.54, 0.90], [0.92, 0.85 - ht]], 14, rng, jit),
+            _curve([[0.16, 0.15], [0.15, 0.85], [0.24, 0.86], [0.54, 0.86 - 0.5 * ht], [0.92, 0.84 - ht]], 14, rng, jit),
         ]
     elif idx == 4:  # ㄸ
         return [
@@ -320,11 +398,17 @@ def choseong_strokes(
             _curve([[0.56, 0.15], [0.54, 0.88], [0.95, 0.86 - ht]], 12, rng, jit),
         ]
     elif idx == 5:  # ㄹ: 3-stroke print vs 2-stroke natural handwriting
-        if arch == "classic_jeongja":
+        if arch in ("classic_jeongja", "geometric_sans"):
             return [
                 _curve([[0.10, 0.14], [0.86, 0.14], [0.86, 0.46]], 10, rng, 0.0),
                 _curve([[0.14, 0.46], [0.86, 0.46]], 8, rng, 0.0),
                 _curve([[0.14, 0.46], [0.14, 0.88], [0.88, 0.88]], 10, rng, 0.0),
+            ]
+        if arch == "retro_typewriter":
+            return [
+                _curve([[0.12, 0.16], [0.84, 0.16], [0.84, 0.48]], 10, rng, 0.006),
+                _curve([[0.16, 0.48], [0.84, 0.48]], 8, rng, 0.006),
+                _curve([[0.16, 0.48], [0.16, 0.86], [0.84, 0.86]], 10, rng, 0.006),
             ]
         if arch == "master_heullim":
             return [_curve([
@@ -333,28 +417,35 @@ def choseong_strokes(
                 [0.84, 0.36],
                 [0.45, 0.44],
                 [0.14, 0.50],
-                [0.15, 0.86],
-                [0.54, 0.90],
-                [0.94, 0.84 - ht]
+                [0.15, 0.84],
+                [0.26, 0.86],
+                [0.65, 0.85 - 0.5 * ht],
+                [0.94, 0.82 - ht]
             ], 20, rng, jit)]
         if arch == "gosi":
-            return [_curve([[0.08, 0.14], [0.88, 0.10 - ht], [0.82, 0.46], [0.12, 0.50], [0.14, 0.88], [0.92, 0.84 - ht]], 16, rng, jit)]
+            return [_curve([[0.08, 0.14], [0.88, 0.10 - ht], [0.82, 0.46], [0.12, 0.50], [0.14, 0.86], [0.92, 0.83 - ht]], 16, rng, jit)]
         if connectedness < 0.35 or (connectedness < 0.78 and roll < 0.45):
             return [
                 _curve([[0.08, 0.15], [0.87, 0.10 - ht], [0.85, 0.46]], 11, rng, jit),
                 _curve([[0.14, 0.48], [0.50, 0.46], [0.85, 0.45 - ht]], 9, rng, jit),
-                _curve([[0.14, 0.48], [0.12, 0.89], [0.54, 0.90], [0.93, 0.85 - ht]], 12, rng, jit),
+                _curve([[0.14, 0.48], [0.13, 0.85], [0.22, 0.86], [0.54, 0.86 - 0.5 * ht], [0.93, 0.84 - ht]], 12, rng, jit),
             ]
         return [
             _curve([[0.08, 0.15], [0.87, 0.10 - ht], [0.85, 0.46], [0.14, 0.48]], 14, rng, jit),
-            _curve([[0.14, 0.48], [0.12, 0.89], [0.54, 0.90], [0.93, 0.85 - ht]], 12, rng, jit),
+            _curve([[0.14, 0.48], [0.13, 0.85], [0.22, 0.86], [0.54, 0.86 - 0.5 * ht], [0.93, 0.84 - ht]], 12, rng, jit),
         ]
     elif idx == 6:  # ㅁ: 3-stroke crisp box vs 2-stroke box (never a circle)
-        if arch == "classic_jeongja":
+        if arch in ("classic_jeongja", "geometric_sans"):
             return [
                 _curve([[0.14, 0.14], [0.14, 0.88]], 8, rng, 0.0),
                 _curve([[0.14, 0.14], [0.86, 0.14], [0.86, 0.88]], 12, rng, 0.0),
                 _curve([[0.14, 0.88], [0.86, 0.88]], 8, rng, 0.0),
+            ]
+        if arch == "retro_typewriter":
+            return [
+                _curve([[0.16, 0.16], [0.16, 0.86]], 8, rng, 0.006),
+                _curve([[0.16, 0.16], [0.84, 0.16], [0.84, 0.86]], 12, rng, 0.006),
+                _curve([[0.16, 0.86], [0.84, 0.86]], 8, rng, 0.006),
             ]
         if arch == "master_heullim":
             return [
@@ -376,12 +467,19 @@ def choseong_strokes(
             _curve([[0.14, 0.14], [0.86, 0.11 - ht], [0.84, 0.88], [0.15, 0.89]], 15, rng, jit),
         ]
     elif idx == 7:  # ㅂ: always clean 4-stroke or 3-stroke with clear vertical posts
-        if arch == "classic_jeongja":
+        if arch in ("classic_jeongja", "geometric_sans"):
             return [
                 _curve([[0.16, 0.08], [0.16, 0.90]], 9, rng, 0.0),
                 _curve([[0.84, 0.08], [0.84, 0.90]], 9, rng, 0.0),
                 _curve([[0.16, 0.48], [0.84, 0.48]], 7, rng, 0.0),
                 _curve([[0.16, 0.89], [0.84, 0.89]], 7, rng, 0.0),
+            ]
+        if arch == "retro_typewriter":
+            return [
+                _curve([[0.18, 0.10], [0.18, 0.88]], 9, rng, 0.006),
+                _curve([[0.82, 0.10], [0.82, 0.88]], 9, rng, 0.006),
+                _curve([[0.18, 0.50], [0.82, 0.50]], 7, rng, 0.006),
+                _curve([[0.18, 0.88], [0.82, 0.88]], 7, rng, 0.006),
             ]
         if arch == "master_heullim":
             return [

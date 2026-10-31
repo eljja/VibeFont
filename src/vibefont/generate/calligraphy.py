@@ -206,25 +206,42 @@ def _sculpt_ko_syllable_strokes(
             if is_hero and is_last:
                 is_tail = True
 
-        # 3. Sweeping downward/diagonal brush tail on final vertical or diagonal strokes (삐침/파임)
-        elif is_last and (is_hero or is_word_end) and span_y > 0.50:
+        # 3. Sweeping brush tail on final strokes (삐침/파임 vs 가로끝 처리)
+        elif is_last and (is_hero or is_word_end) and len(pts) >= 4:
             swash_mult = morph.swash_reach if morph is not None else 1.0
-            tail_len = (0.55 if is_hero else 0.35) * swash_mult * float(rng.uniform(0.95, 1.15))
             end_pt = pts[-1]
             d_end = pts[-1] - pts[-3]
             norm_d = max(float(np.linalg.norm(d_end)), 1e-4)
             dir_vec = d_end / norm_d
-            sweep_dir = np.array([0.35 * dir_vec[0] - 0.12, max(0.75, dir_vec[1])])
-            sweep_dir /= np.linalg.norm(sweep_dir)
-            tail_pts, _ = ballistic_flourish(
-                start_pt=end_pt,
-                initial_direction=sweep_dir,
-                length_mm=tail_len,
-                inertia_curvature=-0.30 * float(rng.uniform(0.8, 1.2)),
-                n_pts=14,
-            )
-            pts = np.concatenate([pts[:-1], tail_pts], axis=0)
-            is_tail = True
+
+            # Only genuine vertical or downward diagonal strokes (e.g. ㅣ, ㅏ, ㅓ, ㅅ, ㅈ) flourish downwards
+            if dir_vec[1] > 0.40 and span_y > 0.45:
+                tail_len = (0.50 if is_hero else 0.32) * swash_mult * float(rng.uniform(0.95, 1.15))
+                sweep_dir = np.array([0.35 * dir_vec[0] - 0.10, max(0.70, dir_vec[1])])
+                sweep_dir /= np.linalg.norm(sweep_dir)
+                tail_pts, _ = ballistic_flourish(
+                    start_pt=end_pt,
+                    initial_direction=sweep_dir,
+                    length_mm=tail_len,
+                    inertia_curvature=-0.30 * float(rng.uniform(0.8, 1.2)),
+                    n_pts=14,
+                )
+                pts = np.concatenate([pts[:-1], tail_pts], axis=0)
+                is_tail = True
+            elif dir_vec[0] > 0.55 and dir_vec[1] < 0.35 and is_hero and span_x > 0.65:
+                # Horizontal strokes (ㄴ, ㄷ, ㄹ, ㅡ) taper horizontally/upward, NEVER downwards
+                tail_len = 0.22 * swash_mult * float(rng.uniform(0.9, 1.1))
+                sweep_dir = np.array([0.96, min(0.04, max(-0.12, dir_vec[1]))])
+                sweep_dir /= np.linalg.norm(sweep_dir)
+                tail_pts, _ = ballistic_flourish(
+                    start_pt=end_pt,
+                    initial_direction=sweep_dir,
+                    length_mm=tail_len,
+                    inertia_curvature=0.10,
+                    n_pts=10,
+                )
+                pts = np.concatenate([pts[:-1], tail_pts], axis=0)
+                is_tail = True
 
         out.append((pts, s_weight, is_tail))
     return out
