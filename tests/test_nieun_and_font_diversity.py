@@ -6,8 +6,10 @@ from vibefont.generate.hangul import (
     WriterProfile,
     choseong_strokes,
     jongseong_strokes,
+    jungseong_strokes,
     hangul_char_strokes,
 )
+from vibefont.generate.procedural import ProceduralGenerator
 from vibefont.generate.calligraphy import compose_calligraphy_page
 from vibefont.vibe.interpreter import interpret
 from vibefont.vibe.spec import VibeSpec, StyleSpec
@@ -131,3 +133,47 @@ def test_lexicon_maps_diverse_font_prompts():
     # 4. 자유분방 필기체
     spec_free = interpret("자유분방하고 거침없는 손글씨 필기체")
     assert spec_free.style.connectedness >= 0.50
+
+
+def test_procedural_latin_supports_diverse_hershey_fonts():
+    """Verify ProceduralGenerator selects genuinely distinct Latin font families per archetype."""
+    gen = ProceduralGenerator()
+    expected = {
+        "geometric_sans": "futural",
+        "classic_myeongjo": "timesr",
+        "italic_serif": "timesi",
+        "blackletter": "gothiceng",
+        "bold_marker": "futuram",
+        "master_heullim": "scriptc",
+        "retro_typewriter": "rowmand",
+    }
+    stroke_counts = {}
+    for arch, font_name in expected.items():
+        assert arch in WRITER_ARCHETYPES
+        st = StyleSpec(archetype=arch)
+        font = gen._font(st)
+        assert font.name == font_name, f"Expected {font_name} for {arch}, got {font.name}"
+        strokes, _ = font.word("Vibe")
+        stroke_counts[arch] = len(strokes)
+    assert len(set(stroke_counts.values())) >= 4
+
+
+def test_geometric_sans_jungseong_straightness():
+    """In geometric_sans, vertical (ㅣ=20) and horizontal (ㅡ=18) vowels should be dead straight."""
+    prof = WriterProfile(archetype="geometric_sans", horiz_tilt=0.0, stem_bend=0.0)
+    rng = np.random.default_rng(42)
+    st_i = jungseong_strokes(20, rng=rng, profile=prof)[0]
+    assert np.ptp(st_i[:, 0]) < 1e-4, f"geometric_sans ㅣ bent by {np.ptp(st_i[:, 0])}"
+    st_eu = jungseong_strokes(18, rng=rng, profile=prof)[0]
+    assert np.ptp(st_eu[:, 1]) < 1e-4, f"geometric_sans ㅡ tilted/bent by {np.ptp(st_eu[:, 1])}"
+
+
+def test_lexicon_maps_extended_font_archetypes():
+    spec_blk = interpret("중세 고딕 블랙레터 폰트")
+    assert spec_blk.style.archetype == "blackletter"
+
+    spec_it = interpret("클래식 이탤릭 세리프")
+    assert spec_it.style.archetype == "italic_serif"
+
+    spec_mk = interpret("굵은 마커체 제목")
+    assert spec_mk.style.archetype == "bold_marker"

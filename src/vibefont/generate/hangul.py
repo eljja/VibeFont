@@ -51,6 +51,9 @@ WRITER_ARCHETYPES = (
     "geometric_sans",
     "classic_myeongjo",
     "retro_typewriter",
+    "blackletter",
+    "italic_serif",
+    "bold_marker",
 )
 
 
@@ -129,6 +132,33 @@ def sample_writer_profile(
         s_bend = 0.0
         loop_r = 0.92
         allo_bias = 0.05
+    elif arch == "blackletter":
+        w_sc = float(rng.uniform(0.84, 0.92))
+        h_sc = float(rng.uniform(1.06, 1.14))
+        cho_sc = 1.04
+        jong_sc = 0.96
+        h_tilt = 0.06
+        s_bend = 0.0
+        loop_r = 0.85
+        allo_bias = 0.25
+    elif arch == "italic_serif":
+        w_sc = float(rng.uniform(0.94, 1.00))
+        h_sc = float(rng.uniform(1.00, 1.06))
+        cho_sc = 1.0
+        jong_sc = 0.96
+        h_tilt = 0.04
+        s_bend = 0.015
+        loop_r = 0.98
+        allo_bias = 0.30
+    elif arch == "bold_marker":
+        w_sc = float(rng.uniform(1.06, 1.16))
+        h_sc = float(rng.uniform(0.98, 1.05))
+        cho_sc = 1.10
+        jong_sc = 1.00
+        h_tilt = 0.03
+        s_bend = 0.0
+        loop_r = 1.15
+        allo_bias = 0.20
     elif arch == "rounded_diary":
         w_sc = float(rng.uniform(1.12, 1.25))
         h_sc = float(rng.uniform(0.90, 0.98))
@@ -630,15 +660,22 @@ def jungseong_strokes(
     profile: WriterProfile | None = None,
 ) -> list[np.ndarray]:
     """Returns list of smooth curved (M, 2) strokes in normalized [0, 1] x [0, 1] box with clean legibility."""
-    ht = float(np.clip(profile.horiz_tilt if profile is not None else 0.04, -0.02, 0.08))
-    sb = float(np.clip(profile.stem_bend if profile is not None else 0.0, -0.035, 0.035))
-    jit = 0.015 if rng is not None else 0.0
+    arch = profile.archetype if profile is not None else "standard"
+    is_crisp = arch in ("classic_jeongja", "geometric_sans")
+    is_mech = arch == "retro_typewriter"
+    ht = 0.0 if (is_crisp or is_mech) else float(np.clip(profile.horiz_tilt if profile is not None else 0.04, -0.02, 0.08))
+    sb = 0.0 if (is_crisp or is_mech) else float(np.clip(profile.stem_bend if profile is not None else 0.0, -0.035, 0.035))
+    jit = 0.0 if is_crisp else (0.004 if is_mech else (0.015 if rng is not None else 0.0))
 
     def v_main(x: float) -> np.ndarray:
+        if is_crisp or is_mech:
+            return _curve([[x, 0.02], [x, 0.50], [x, 0.98]], 12, rng, jit)
         bend = sb + (float(rng.normal(0.0, 0.018)) if rng is not None else -0.01)
         return _curve([[x, 0.02], [x + bend, 0.52], [x, 0.98]], 12, rng, jit)
 
     def h_main(y: float) -> np.ndarray:
+        if is_crisp or is_mech:
+            return _curve([[0.04, y], [0.50, y], [0.96, y]], 11, rng, jit)
         tilt = ht + (float(rng.normal(0.0, 0.018)) if rng is not None else 0.02)
         return _curve([[0.04, y + 0.02], [0.50, y - 0.01], [0.96, y - tilt]], 11, rng, jit)
 
@@ -794,6 +831,8 @@ def _transform_strokes(
 ) -> list[np.ndarray]:
     if rng is not None:
         clumsy = max(0.45, 1.75 - 1.35 * float(np.clip(neatness, 0.0, 1.0)))
+        if neatness > 0.92:
+            clumsy *= max(0.0, (1.0 - float(neatness)) / 0.08)
         dx = float(np.clip(rng.normal(0.0, 0.018 * w * clumsy), -0.042 * w, 0.042 * w))
         dy = float(np.clip(rng.normal(0.0, 0.018 * h * clumsy), -0.042 * h, 0.042 * h))
         x += dx
@@ -933,7 +972,7 @@ def syllable_strokes_with_joins(
 
     has_jong = f_idx > 0
     eff_conn = connectedness if profile is None else float(np.clip(0.6 * connectedness + 0.4 * profile.allograph_bias, 0.0, 1.0))
-    if profile is not None and profile.archetype == "classic_jeongja":
+    if profile is not None and profile.archetype in ("classic_jeongja", "geometric_sans", "retro_typewriter"):
         eff_conn = 0.0
     c_st = choseong_strokes(c_idx, rng=rng, connectedness=eff_conn, profile=profile)
     j_st = jungseong_strokes(j_idx, connectedness=eff_conn, rng=rng, profile=profile)
@@ -941,8 +980,8 @@ def syllable_strokes_with_joins(
 
     w_sc = profile.w_scale if profile is not None else 1.0
     h_sc = profile.h_scale if profile is not None else 1.0
-    cho_sc = float(np.clip(profile.cho_scale if profile is not None else 1.0, 0.90, 1.12))
-    jong_sc = float(np.clip(profile.jong_scale if profile is not None else 1.0, 0.88, 1.10))
+    cho_sc = float(np.clip(profile.cho_scale if profile is not None else 1.0, 0.85, 1.20))
+    jong_sc = float(np.clip(profile.jong_scale if profile is not None else 1.0, 0.78, 1.15))
 
     if rng is not None:
         clumsy_s = max(0.28, 1.85 - 1.68 * float(np.clip(neatness, 0.0, 1.0)))

@@ -44,6 +44,7 @@ class _Font:
     def __init__(self, name: str):
         from HersheyFonts import HersheyFonts  # optional dependency: pip install Hershey-Fonts
 
+        self.name = name
         self.f = HersheyFonts()
         self.f.load_default_font(name)
         xs = np.concatenate([np.asarray(s, float) for s in self.f.strokes_for_text("x")])
@@ -75,8 +76,10 @@ class _Font:
     ) -> list[PlacedGlyph]:
         word = validate_text_glyphs(word, allow_hangul=True)
         clumsy = max(0.45, 1.65 - 1.25 * float(np.clip(neatness, 0.0, 1.0)))
-        prof_w = float(np.clip(profile.w_scale if profile is not None else 1.0, 0.88, 1.14))
-        prof_h = float(np.clip(0.98 + 0.25 * ((profile.h_scale if profile is not None else 1.0) - 1.0), 0.92, 1.08))
+        if neatness > 0.92:
+            clumsy *= max(0.05, (1.0 - float(neatness)) / 0.08)
+        prof_w = float(np.clip(profile.w_scale if profile is not None else 1.0, 0.72, 1.32))
+        prof_h = float(np.clip(profile.h_scale if profile is not None else 1.0, 0.85, 1.20))
 
         placed_glyphs: list[PlacedGlyph] = []
         cursor_x = 0.0
@@ -274,18 +277,43 @@ def _deform(strokes: list[np.ndarray], amp: float, rng: np.random.Generator, n: 
     return out
 
 
+ARCHETYPE_LATIN_FONTS: dict[str, str] = {
+    "geometric_sans": "futural",
+    "bold_marker": "futuram",
+    "classic_jeongja": "rowmans",
+    "classic_myeongjo": "timesr",
+    "italic_serif": "timesi",
+    "retro_typewriter": "rowmand",
+    "blackletter": "gothiceng",
+    "master_heullim": "scriptc",
+    "rounded_diary": "scripts",
+    "gosi": "cursive",
+    "tall_slender": "futural",
+    "wide_round": "futuram",
+    "bold_head": "timesrb",
+}
+
+
 class ProceduralGenerator:
     name = "procedural"
 
     def __init__(self) -> None:
-        self.fonts = {
+        self.fonts: dict[str, _Font] = {
             "fancy": _Font("scripts"),
             "cursive": _Font("cursive"),
             "print": _Font("futural"),
         }
 
+    def _get_hershey(self, hershey_name: str) -> _Font:
+        if hershey_name not in self.fonts:
+            self.fonts[hershey_name] = _Font(hershey_name)
+        return self.fonts[hershey_name]
+
     def _font(self, style: StyleSpec) -> _Font:
-        if getattr(style, "archetype", "") == "master_heullim" or (style.connectedness >= 0.65 and style.roundness >= 0.55):
+        arch = getattr(style, "archetype", "standard")
+        if arch in ARCHETYPE_LATIN_FONTS:
+            return self._get_hershey(ARCHETYPE_LATIN_FONTS[arch])
+        if style.connectedness >= 0.65 and style.roundness >= 0.55:
             return self.fonts["fancy"]
         if style.connectedness >= 0.36:
             return self.fonts["cursive"]
@@ -305,6 +333,7 @@ class ProceduralGenerator:
         profile = sample_writer_profile(np.random.default_rng(w_seed), st)
         all_strokes: list[np.ndarray] = []
         cursor = 0.0
+        crisp_damp = 0.20 if (ls.neatness >= 0.92 and st.consistency >= 0.90) else 1.0
         for word in req.text.split():
             strokes, width = f.word(word, rng=rng, connectedness=st.connectedness, neatness=ls.neatness, profile=profile)
             if not strokes:
@@ -318,15 +347,15 @@ class ProceduralGenerator:
                 strokes = [np.stack([gaussian_filter1d(s[:, 0], sig, mode="nearest"),
                                      gaussian_filter1d(s[:, 1], sig, mode="nearest")], 1) if len(s) > 4 else s
                            for s in strokes]
-            deform_amp = (0.010 + 0.020 * loose) if has_h else (0.014 + 0.030 * loose)
+            deform_amp = ((0.010 + 0.020 * loose) if has_h else (0.014 + 0.030 * loose)) * crisp_damp
             strokes = _deform(strokes, deform_amp, rng)
             # per-word jitter
-            sc = float(np.clip(np.exp(rng.normal(0.0, 0.032 + 0.042 * loose)), 0.86, 1.11))
-            rot = np.radians(np.clip(rng.normal(0.0, 0.5 + 1.0 * loose), -1.5, 1.5))
+            sc = float(np.clip(np.exp(rng.normal(0.0, (0.032 + 0.042 * loose) * crisp_damp)), 0.86, 1.11))
+            rot = np.radians(np.clip(rng.normal(0.0, (0.5 + 1.0 * loose) * crisp_damp), -1.5, 1.5))
             base_slant = 0.45 * ls.slant_deg if has_h else ls.slant_deg
-            slant = base_slant + float(np.clip(rng.normal(0.0, 1.5 + 2.8 * (1 - st.consistency)), -6.5, 6.5))
+            slant = base_slant + float(np.clip(rng.normal(0.0, (1.5 + 2.8 * (1 - st.consistency)) * crisp_damp), -6.5, 6.5))
             k = np.tan(np.radians(slant))
-            dy = float(np.clip(rng.normal(0.0, 0.025 + 0.045 * st.baseline_wobble), -0.09, 0.09))
+            dy = float(np.clip(rng.normal(0.0, (0.025 + 0.045 * st.baseline_wobble) * crisp_damp), -0.09, 0.09))
             sx = st.width_scale * st.letter_spacing
             c, s_ = np.cos(rot), np.sin(rot)
             placed = []
