@@ -1,115 +1,135 @@
 # VibeFont ✒️✨
 
-> **Living, Breathing Handwriting Generation Engine**  
-> 고정된 디지털 글리프를 넘어, 문맥에 따라 살아 숨 쉬는 연속적 궤적과 아날로그 펜의 물리적 질감을 재현하는 차세대 동적 필기체 합성 시스템
+> **Text + Vibe Prompt ➔ Diverse Fonts & Physically Grounded Handwriting**  
+> 고정된 단일 폰트나 디지털 스탬프를 넘어, **한글·영문 16종 이상의 다채로운 서체 아키타입(고딕·명조·궁체 흘림·속기·다이어리·타자기·블랙레터·스펜서리안 등)**과 **아날로그 필기구의 물리적 접촉 흔적(만년필 닙 갈라짐·볼펜 림 페이스트·연필 흑연 입자 고착)**을 결합한 차세대 멀티 폰트 및 필기 합성 엔진입니다.
 
-[![GitHub license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Architecture](https://img.shields.io/badge/Architecture-Autoregressive%20LMM%20%2B%20Physics%20Shader-purple.svg)](docs/MASTER_PLAN.md)
-[![Status](https://img.shields.io/badge/Status-Architecture%20Review-orange.svg)](docs/OPUS_VERIFICATION_GUIDE.md)
-
----
-
-## 💡 The Core Problem & VibeFont Realism Architecture (해결 완료 ✅)
-
-디지털 필기체 폰트가 부자연스러운 3대 핵심 문제를 순수 기하학 리가처, 유체/접촉 물리 셰이더, 문맥/필자 동적 변형 엔진을 통해 완벽히 해결했습니다:
-
-1. **단절된 연결성 (Broken Ligatures) 해결** ➔ [`src/vibefont/generate/ligature.py`](src/vibefont/generate/ligature.py)
-   * **앵커 자동 검출 & 스무스스텝 블렌딩:** 글리프의 진입점(Entry)과 탈출점(Exit)을 기하학적으로 감지하고, 글리프 본체 왜곡 없이 꼬리와 머리를 부드러운 스무스스텝($3w^2 - 2w^3$)으로 연결합니다.
-   * **지연 획 분리 (Delayed Strokes):** 'i'의 점, 't'의 가로획 등 지연 획을 단어 전체 필기 궤적에서 자동 분리하여, 단어 본문을 끊김 없이 한 번에 이어 쓴 뒤 마지막에 찍는 실제 인간의 필기 습관을 모사합니다 (펜 리프트 80% 이상 감소).
-   * **높은 탈출(High Exit) 처리:** 'b', 'o', 'v', 'w' 뒤의 높은 연결선과 일반 기저선 연결선을 문맥 분기하여 자연스럽게 이어줍니다.
-   * **한글 자모 간 연속 획 (Cross-Jamo Cursive):** 초성-중성-종성 간의 간격을 분석하여 다른 획과 교차하지 않는 무충돌 2차 베지어 헤어라인 커넥터를 형성합니다.
-
-2. **아날로그 물리감 부재 해결** ➔ [`src/vibefont/render/fluid.py`](src/vibefont/render/fluid.py), [`src/vibefont/render/pens.py`](src/vibefont/render/pens.py)
-   * **머무름 시간 기반 잉크 고임 (Dwell-Time Ink Pooling):** 펜이 급커브나 정지 지점에서 머문 국소 시간(Excess Dwell)을 적분하여 만년필(+90%), 젤/마커(+60%), 볼펜(+30%)에 유기적인 잉크 고임 농담(Shading)을 구현합니다 (연필 등 건식 필기구는 격리).
-   * **종이 섬유 지향 비등방성 번짐 (Anisotropic Fibre Feathering):** 가우시안 평활화된 2D 셀룰로오스 섬유 각도장($\theta$)을 따라 서브픽셀 잉크 확산 시뮬레이션을 수행하여 인위적 흐림이 아닌 진짜 종이 번짐을 재현합니다.
-   * **유성 볼펜 페이스트 뭉침 & 롤러볼 스킵 (Ballpoint Goop & Skips):** 소켓 테두리에 누적된 끈적한 유성 잉크가 급회전 시 종이에 긁혀 나오는 코너 블롭과, 롤러볼 회전 주기($\pi D_{\text{ball}} \approx 2.2\text{mm}$) 및 고속 필기 시의 미세 스킵을 모델링했습니다.
-   * **젖은 잉크 겹침 번짐 (Wet-on-Wet Overlap Bleed):** 직전 획이 아직 마르지 않은 시간 윈도우(1.5초) 내에 새로운 획이 교차할 때 두 획의 잉크가 모세관 현상으로 번져 교차점이 더 짙고 부드럽게 융합됩니다.
-
-3. **정적 글리프 (Static Glyphs) 해결** ➔ [`src/vibefont/generate/procedural.py`](src/vibefont/generate/procedural.py)
-   * **단어 내 위치별 변형 (Position-in-Word Dynamics):** 단어 시작 글자는 또박또박 안정적으로(계수 0.85), 중간 글자는 정속으로(1.0), 단어 끝 글자는 자연스럽게 풀리는 꼬리(1.30)로 변형합니다.
-   * **필자별 글자쌍 커넥터 습관 (Letter-Pair Habit):** 동일 필자의 고유 해시(CRC32)를 통해 특정 글자쌍(예: 'er', 'th')을 이어 쓸 때 발생하는 고유한 높낮이/각도 습관을 결정론적으로 유지하면서 미세 실행 지터를 부여합니다.
-   * **캡차(CAPTCHA)급 왜곡 원천 배제:** 가독성을 해치는 비선형 워핑 대신 철저한 가독성 클립 경계 내에서 인간 필적 수준의 자연스러운 비정형성만을 부여합니다.
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776ab.svg)](pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-148%20passed-brightgreen.svg)](tests/)
+[![Architecture](https://img.shields.io/badge/Architecture-Procedural%20%2B%20Autoregressive%20LMM%20%2B%20Physics%20Renderer-purple.svg)](docs/MASTER_PLAN.md)
 
 ---
 
-## 🚀 The VibeFont Solution: 2-Stage Hybrid Architecture
+## 🎨 20-Font Multi-Style Spectrum (한글 10종 + 영문 10종)
 
-Diffusion 모델의 치명적 단점인 **철자 환각(Spelling Hallucination)**과 **느린 추론 속도**를 배제하고, 언어모델의 시퀀스 정렬 능력과 GPU 셰이더의 초고속 물리 렌더링을 결합한 하이브리드 파이프라인을 구축합니다.
+하나의 정형화된 필기체에 머물지 않고, 기하학적 직선 고딕부터 평촉(Broad Nib) 기반 명조 세리프, 전통 궁체 흘림, 빠른 속기, 귀여운 다이어리, 수묵 붓글씨, 중세 블랙레터, 스펜서리안, 레트로 타자기까지 **자연어 프롬프트 또는 파라미터로 자유롭게 생성**합니다.
 
+![VibeFont 20-Font Korean and English Diversity Showcase](docs/assets/max_diversity_ko_en.png)
+
+### 지원 서체 아키타입 (`StyleSpec.archetype`)
+
+| 계열 | 아키타입 키 | 한글 / 영문 특성 및 조형 구조 |
+| :--- | :--- | :--- |
+| **모던 직선 고딕** | `geometric_sans` | 90도 직각 코너, 수평 모음/받침('ㄴ' 처짐 제거), 군더더기 없는 산세리프 (`futural`) |
+| **단아한 명조/바탕** | `classic_myeongjo` | 횡세종태(가로 가늘고 세로 굵음), 우상향 세리프 발끝 삐침, 로만 세리프 (`timesr`) |
+| **명필 궁체 흘림** | `master_heullim` | 우아한 S자 3단 굽이침 'ㄹ', 유선형 'ㅁ·ㅂ', 스펜서리안/카퍼플레이트 (`scriptc`) |
+| **자유분방 고시 속기** | `gosi` | +13° 빠른 기울기, 1획 지그재그 Z-'ㄹ'·타원 'ㅁ', 신속한 필기 리가처 (`cursive`) |
+| **동글동글 다이어리** | `rounded_diary` | 확장된 개방형 원형 'ㅇ·ㅎ', 부드러운 코너 라운드, 친근한 손글씨 (`scripts`) |
+| **정갈한 정자체** | `classic_jeongja` | 기울기 없는 90도 직교 분리획(2획 ㄱ·ㄴ, 3획 ㅁ, 4획 ㅂ), 제도 로만 (`rowmans`) |
+| **수묵 붓/강조 헤드** | `bold_head` | 웅장한 초성·콤팩트한 받침 대비, 볼드 세리프 (`timesrb`) & 붓 필압 모듈레이션 |
+| **굵은 팝 마커체** | `bold_marker` | 1.3mm 마커 닙, 더블 스트로크 볼드 디스플레이 (`futuram`), 강한 포스터 존재감 |
+| **중세 블랙레터** | `blackletter` | 45° 평촉 닙 각도, 고딕 올드 잉글리시/프락투어 조형 (`gothiceng`) |
+| **이탤릭 세리프** | `italic_serif` | 유려한 12° 이탤릭 슬랜트, 평촉 굵기 대비 (`timesi`) |
+| **빈티지 타자기** | `retro_typewriter` | 균일한 타자 리듬, 모노스페이스 타건 텍스처, 제도 더블 스트로크 (`rowmand`) |
+| **장체 / 평체 / 스케치** | `tall_slender`, `wide_round`, `upward_flow` | 68% 슬림 장체, 125% 통통한 평체, 우상향 자유 스케치 변형 |
+
+---
+
+## 🔬 물리 기반 펜·종이 접촉 마이크로 셰이더 (`fluid.py`, `pens.py`, `raster.py`)
+
+단순히 원형 브러시를 찍는 컴퓨터 래스터 방식을 탈피해, **7종 필기구(`ballpoint`, `gel`, `fountain`, `pencil`, `marker`, `brush`, `broad_nib`)와 5종 종이(`plain`, `ivory`, `ruled`, `grid`, `kraft`)의 물리적 상호작용**을 시뮬레이션합니다.
+
+![Physical Pen-Paper Micro-Dynamics Comparison](docs/assets/pen_microphysics.png)
+
+* **연필 (Pencil Graphite Shear):** 종이 섬유 돌기(Paper Tooth Peaks)에만 흑연 결정이 깎여 묻어나고, 골짜기에는 자연스러운 미세 공백(Micro-voids)이 남습니다.
+* **만년필 (Fountain Pen Tine Split & Pooling):** 필압 상승 시 두 갈래 닙이 벌어지며 외곽 듀얼 레일이 형성되고, 저속 커브 구간의 머무름 시간(Dwell-Time)에 따라 잉크 고임(Shading)과 셀룰로오스 섬유 지향 번짐, 젖은 획 교차 번짐(Wet-on-Wet Bleed)이 발생합니다.
+* **유성 볼펜 (Ballpoint Rim Paste & Indentation):** 볼 소켓 테두리에 뭉친 고점도 잉크 릿지(Rim Paste), 회전 주기 기반 미세 스킵, 필압에 의한 미세 종이 눌림(Micro-relief)을 재현합니다.
+
+---
+
+## ✒️ 자유분방 속기 vs 명필 정통 캘리그라피
+
+문맥적 리가처 엔진([`ligature.py`](src/vibefont/generate/ligature.py))과 생체역학적 관성 삐침([`calligraphy.py`](src/vibefont/generate/calligraphy.py))이 결합되어 거침없는 실전 속기체부터 서양 스펜서리안·조선 궁체 캘리그라피까지 폭넓게 표현합니다.
+
+| 한글: 자유분방 속기체 vs 명필 정통 흘림체 | 영문: 스펜서리안 만년필 캘리그라피 |
+| :---: | :---: |
+| ![Casual vs Master Heullim](docs/assets/master_vs_casual_cursive.png) | ![Spencerian Calligraphy](docs/assets/spencerian_calligraphy.png) |
+
+---
+
+## 🚀 Quickstart
+
+### 1. 설치 (Installation)
+
+```bash
+git clone https://github.com/eljja/VibeFont.git
+cd VibeFont
+python -m venv .venv
+# Windows (PowerShell): .venv\Scripts\Activate.ps1
+# Linux/macOS: source .venv/bin/activate
+pip install -e ".[placeholder,dev]"
 ```
-[입력 텍스트 + 스타일 프롬프트 / 손글씨 사진]
-                       │
-                       ▼
-    ┌────────────────────────────────────────┐
-    │       Stroke Trajectory Generator      │
-    │  (Track A: 5~25M / Track B: ~50~300M)  │
-    │  - 예측: (Δx, Δy, Δt, 펜 상태, [필압])   │
-    └────────────────────────────────────────┘
-                       │ 
-                       ▼ 실시간 벡터 스트림
-    ┌────────────────────────────────────────┐
-    │     Procedural Physical Ink Shader     │
-    │  - WebGL2 → WebGPU 렌더러               │
-    │  - 속도/곡률/유사 필압은 렌더러에서 유도 │
-    └────────────────────────────────────────┘
-                       │
-                       ▼
-      [무한 해상도 벡터(SVG) & 초고해상도 잉크 렌더링]
+
+### 2. CLI 사용법 (`vibefont`)
+
+```bash
+# 프롬프트만으로 원하는 폰트·펜·종이 조합 생성
+vibefont write "가나다라 한빛고딕" -p "깔끔하고 모던한 직선 고딕체 젤펜" -o gothic.png --seed 42
+vibefont write "바람이 머문 자리마다 푸른 빛이 흐른다" -p "명필 흘림체 남색 만년필 미색" -o heullim.png
+vibefont write "Blackletter Heritage" -p "중세 고딕 블랙레터 평촉" -o blackletter.png
+
+# SVG 벡터 출력 / 웹 스튜디오 실행
+vibefont write "1984 기록" -p "빈티지 타자기체 크라프트" -o archival.svg
+vibefont serve --port 8080
 ```
 
----
+### 3. Python API 사용 예시
 
-## 🏗️ Dual-Track Development Roadmap
+```python
+import numpy as np
+from vibefont.vibe.interpreter import interpret
+from vibefont.generate.procedural import ProceduralGenerator
+from vibefont.document.pipeline import write_document
+from vibefont.render.raster import render_page
 
-### 🅰️ Track A: Lightweight Stroke Model (`5M ~ 25M`, 데이터 확보 후 확장)
-* **목표:** 온디바이스 / 웹 브라우저(WebGPU) 실시간 필기 궤적 생성
-* **특징:**
-  * CTC 강제 정렬 기반 하드 조건부 → 글자 누락/반복 구조적 방지
-  * 앞뒤 글자의 문맥 기반 연결
-  * Temperature + sampling bias로 "정갈함 ↔ 자유로움" 제어 (같은 작성자 안에서의 변동)
+spec = interpret("단아한 명조체 평촉 버건디 미색 종이")
+spec.seed = 2026
 
-### 🅱️ Track B: Reference-Image Style Model (인코더 + `50M ~ 300M` 디코더)
-* **목표:** 손글씨 사진으로부터 필체, 기울기, 자간을 추출하여 모사
-* **특징:**
-  * writer-ID 대조 학습 인코더 vs DINOv2-small 비교 후 선정
-  * Perceiver Resampler (K=32 스타일 토큰)
-  * 기준선: SDT (CVPR 2023)
+gen = ProceduralGenerator()
+pages = write_document("산골짝 은은한 달빛이 고요히 흐른다.", spec, gen, np.random.default_rng(spec.seed))
+img = render_page(pages[0], spec, dpi=300)
+img.save("myeongjo_sample.png")
+```
 
-### 🎨 Shared Core: Procedural Physical Ink Shader
-* 모델 출력 (x, y, t, state)에서 속도·곡률·유사 필압을 유도하여 GPU에서 렌더링
-* **만년필:** 저속 구간 잉크 고임, 종이 섬유 번짐, 농담
-* **볼펜:** 필압/속도 기반 밀도, 스킵, 획 시작점 뭉침
-* **넓은 펜촉:** 획 방향과 펜촉 각도에 따른 굵기 변화
+### 4. 테스트 실행
+
+```bash
+pytest tests/ -q
+```
 
 ---
 
 ## 📂 Repository Structure
 
-```
+```text
 VibeFont/
 ├── docs/
-│   ├── MASTER_PLAN.md               # 마스터 계획서 (v1.1)
-│   ├── OPUS_VERIFICATION_GUIDE.md   # 검증 프롬프트
-│   └── reviews/OPUS_REVIEW_v1.md    # Opus 아키텍처 리뷰
-├── src/                             # (예정)
-│   ├── data/                        # IAM-OnDB 로더, 전처리, 수집 웹앱
-│   ├── tokenizer/                   # 오차 피드백 양자화 토크나이저
-│   ├── htr/                         # 온라인 HTR(CTC) + 강제 정렬 + 평가
-│   ├── models/                      # Track A / Track B
-│   └── shader/                      # WebGL2/WebGPU 잉크 셰이더
-├── tests/
-├── .gitignore
-├── LICENSE
-└── README.md
+│   ├── assets/                      # README 쇼케이스 고해상도 샘플 이미지
+│   ├── MASTER_PLAN.md               # 듀얼 트랙 개발 마스터 플랜
+│   ├── CALLIGRAPHY_REALISM.md       # 생체역학 캘리그라피 리얼리즘 설계서
+│   ├── USER_GUIDE.md                # 사용자 가이드
+│   └── reviews/                     # 아키텍처 리뷰
+├── src/vibefont/
+│   ├── vibe/                        # VibeSpec 계약, 한국어/영어 프롬프트 렉시콘 & LLM 인터프리터
+│   ├── generate/                    # 한글 자모 알로그래프, 리가처, 운동학(Kinematics), 캘리그라피, LMM 모델
+│   ├── document/                    # 페이지 레이아웃, 줄바꿈, OU 드리프트(피로도·자간 흐름)
+│   ├── render/                      # 물리 펜 팁, 잉크 유체 셰이더, 종이 질감, SVG/래스터 렌더러
+│   ├── models/ & htr/ & data/       # 자기회귀 스트로크 모델, HTR CTC 정렬, 데이터셋 파이프라인
+│   └── web/ & cli.py                # 로컬 인터랙티브 웹 스튜디오 & CLI
+├── scripts/                         # 대량 쇼케이스 & 물리 펜 비교 렌더링 스크립트
+├── tests/                           # 148개 단위/통합/회귀 테스트 스위트
+└── pyproject.toml
 ```
-
----
-
-## 📑 Documentation & Links
-
-* 📘 [상세 마스터 개발 계획서 (Master Plan v1.1)](docs/MASTER_PLAN.md)
-* 🔍 [Opus 아키텍처 리뷰 v1](docs/reviews/OPUS_REVIEW_v1.md)
-* 🔬 [Claude Opus 아키텍처 검증 가이드 (Opus Guide)](docs/OPUS_VERIFICATION_GUIDE.md)
 
 ---
 
